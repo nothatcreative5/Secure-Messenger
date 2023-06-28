@@ -23,6 +23,7 @@ from cryptography.hazmat.primitives import serialization
 HOST = '127.0.0.1'
 username = ""
 password = ""
+MAX_SIZE = 65536
 
 sock = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
 server_sock = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
@@ -38,6 +39,10 @@ server_pkey = None
 
 def login():
     pass
+
+
+def send(resp,c):
+    c.sendall(resp.encode())
 
 def register():
     global username
@@ -62,7 +67,7 @@ def register():
         }
 
         sock.send(Encryption.asymmetric_encrypt(json.dumps(data_to_send), fname=None, publickey=server_pkey))
-        response = json.loads(sock.recv(2048).decode())
+        response = json.loads(sock.recv(MAX_SIZE))
         plain = Encryption.asymmetric_decrypt(response["cipher"], fname=None, privatekey=privatekey)
         signature = response["signature"]
 
@@ -81,8 +86,6 @@ def register():
     
 
 
-
-
 main_page = {":login" : "Login to an existing account", ":register" : "Create an account"}
 main_page_func = {":login" : login, ":register" : register}
 account_page = {":chat" : "Chat with an online user",":showonline" : "Show online users", ":logout" : "Logout from the account"}
@@ -91,35 +94,32 @@ account_page = {":chat" : "Chat with an online user",":showonline" : "Show onlin
 commands = main_page.copy()
 
 def clear_screen():
-    pass
-    # os.system('cls' if os.name == 'nt' else 'clear')
+    os.system('cls' if os.name == 'nt' else 'clear')
 
 
 def handshake():
 
-    sock.connect(('127.0.0.1',1600))
-
     global publickey, privatekey, server_pkey
 
-    publickey, privatekey = Encryption.genkeys()
+    publickey, privatekey = Encryption.genkeys(512)
 
     data_to_send = {
         "type": "handshake",
-        "public_key": Encryption.serialize_public_key(publickey).decode(),
+        "nonce" : "nonce",
     }
 
     try: 
-        sock.send(Encryption.asymmetric_encrypt(json.dumps(data_to_send), fname=None, publickey=server_pkey))
-        response = json.loads(sock.recv(2048).decode())
-        plain = Encryption.asymmetric_decrypt(response["cipher"], fname=None, privatekey=privatekey)
+        send(Encryption.asymmetric_encrypt(json.dumps(data_to_send), fname=None, publickey=server_pkey), sock)
+        response = json.loads(sock.recv(MAX_SIZE).decode())
+        plain = json.loads(response['cipher'])
         signature = response["signature"]
-        if Encryption.verify_signature(plain, signature, fname=None, publickey=server_pkey) == 0 and plain['status'] == 'SUCC':
+        if Encryption.check_authenticity(response['cipher'], signature,server_pkey) == 0 and \
+        plain['status'] == 'SUCC' and plain['nonce'] == 'nonce':
             return 1
         else:
             return 0
 
     except Exception as e:
-        print(e)
         return 0
 
 
@@ -129,16 +129,7 @@ def initial_client():
     print(bcolors.OKBLUE+"Trying to connect and handshake with the server..."+bcolors.ENDC)
     
     try:
-        server_sock.bind(('127.0.0.1',0))
-        server_sock.listen(10)
-    except Exception as e:
-        print(bcolors.FAIL+"Couldn't start the client!"+bcolors.ENDC)
-        print(e)
-        sys.exit(0)
-    
-    try:
-        addr = sys.argv[1]
-        sock.connect((addr,1600))
+        sock.connect(('127.0.0.1',1600))
         handshake_status = handshake()
         if(handshake_status==1):
             clear_screen()
@@ -153,17 +144,14 @@ def initial_client():
 
 
 # Menu is a dictionary of commmands and their descriptions
-def show_menu(menu):
+def show_menu():
     global commands
-
-    clear_screen()
-    print(bcolors.OKBLUE+"\nCOMMANDS - "+bcolors.ENDC)
     
     while True:
-        clear_screen()
+        # clear_screen()
         print(bcolors.OKBLUE+"\nCOMMANDS - "+bcolors.ENDC)
         for command in commands:
-            print(bcolors.OKGREEN+command+bcolors.BOLD+menu[command]+bcolors.ENDC)
+            print(bcolors.OKGREEN+command+bcolors.BOLD+" " + commands[command]+bcolors.ENDC)
         print('\n')
         command = input()
         if command == ":register":
@@ -177,7 +165,8 @@ def show_menu(menu):
 
 def start_client():
     clear_screen()
-    handshake()
+    initial_client()
+    show_menu()
 
 
 

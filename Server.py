@@ -123,9 +123,11 @@ def register(plain,c):
 
 def new_connection(c, a):
     #Accept data from the client
+    global authorized_users
     while True:
         try:
-            payload = json.loads(c.recv(1024).decode())
+            payload = c.recv(1024).decode()
+            # payload = json.loads(c.recv(1024).decode())
         except Exception as e:
             print("Error - %s"%e)
             exit(-1)
@@ -139,7 +141,7 @@ def new_connection(c, a):
 
         else:
             try:
-                payload = json.loads(Encryption.decrypt(payload, private_key))
+                payload = json.loads(Encryption.asymmetric_dycrypt(payload, private_key))
                 if payload['type'] == 'register':
                     plain = payload['plain']
                     nonce = plain['nonce']
@@ -152,34 +154,27 @@ def new_connection(c, a):
                     signature = Encryption.signature(outp, private_key)
                     cipher = Encryption.asymmetric_encrypt(outp, fname=None, publickey=client_keys[c])
                     response = {'cipher': cipher, 'signature': signature}
-                    send(json.dumps(response).encode(), c)
+                    send(json.dumps(response), c)
 
                 elif payload['type'] == 'handshake':
-                    plain = payload['plain']
-                    nonce = plain['nonce']
-                    pkey = Encryption.deserialize_public_key(plain['public_key'].encode())
-                    print(type(pkey))
-                    if pkey not in client_keys.values():
-                        client_keys[c] = pkey
-                        outp = "{'command: 'handshake', 'status': SUCC, 'nonce': %s}"%nonce
-                    else:
-                        outp = "{'command: 'handshake', 'status': FAIL, 'nonce': %s}"%nonce
-
+                    nonce = payload['nonce']
+                    # pkey = Encryption.deserialize_public_key(plain['public_key'].encode())
+                    # print(type(pkey))
+                    outp = '{"command": "handshake", "status": "SUCC", "nonce": "%s"}'%nonce
                     signature = Encryption.signature(outp, private_key)
-                    cipher = Encryption.asymmetric_encrypt(outp, fname=None, publickey=client_keys[c])
-                    response = {'cipher': cipher, 'signature': signature}
-                    send(json.dumps(response).encode(), c)
+                    response = {'cipher': outp, 'signature': signature}
+                    send(json.dumps(response), c)
                     print("Finished Handhake")
 
 
-            except Exception:
+            except Exception as e:
                 print("Error - %s"%e)
                 exit(-1)
 
 
 if __name__ == "__main__":
     makedb()
-    pub_key, private_key =  Encryption.genkeys()
+    pub_key, private_key =  Encryption.genkeys(4096)
     pem = pub_key.public_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PublicFormat.PKCS1)

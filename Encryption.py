@@ -16,17 +16,20 @@ from base64 import (
 )
 
 
+FORMAT = 'latin-1'
+
+
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding
 
  
-def genkeys():
+def genkeys(size):
     # Generate public and private key pair.
 
     private_key = rsa.generate_private_key(
     public_exponent=65537,
-    key_size=2048 * 2,)
+    key_size=size,)
 
     public_key = private_key.public_key()
 
@@ -52,15 +55,16 @@ def symmetric_decrypt(ciphertext, tag, nonce, key):
 def asymmetric_encrypt(text,fname,publickey):
 
     ciphertext = publickey.encrypt(
-    text.encode(),
+    text.encode(FORMAT),
     padding.OAEP(
         mgf=padding.MGF1(algorithm=hashes.SHA256()),
         algorithm=hashes.SHA256(),
         label=None
     ))
-    return ciphertext
+    return ciphertext.decode(FORMAT)
     
 def asymmetric_dycrypt(cipher,privatekey):
+    cipher = cipher.encode(FORMAT)
     plaintext = privatekey.decrypt(
     cipher,
     padding.OAEP(
@@ -68,7 +72,7 @@ def asymmetric_dycrypt(cipher,privatekey):
         algorithm=hashes.SHA256(),
         label=None
     ))
-    return plaintext
+    return plaintext.decode(FORMAT)
 
 
 def hash_string(text):
@@ -78,28 +82,29 @@ def hash_string(text):
 
 def signature(text, private):
     signature = private.sign(
-    text,
+    text.encode(FORMAT),
     padding.PSS(
         mgf=padding.MGF1(hashes.SHA256()),
         salt_length=padding.PSS.MAX_LENGTH
     ),
     hashes.SHA256())
 
-    return signature
+    return signature.decode(FORMAT)
     
 
 def check_authenticity(text,signature,public_key):
     try:
+        # text = text.encode(FORMAT)
         public_key.verify(
-        signature,
-        text,
+        signature.encode(FORMAT),
+        text.encode(FORMAT),
         padding.PSS(
             mgf=padding.MGF1(hashes.SHA256()),
             salt_length=padding.PSS.MAX_LENGTH
         ),
         hashes.SHA256())
         return 0
-    except Exception:
+    except Exception as e:
         return -1
     
 
