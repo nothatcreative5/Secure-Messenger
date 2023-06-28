@@ -57,18 +57,17 @@ def register():
             "plain": {
             "username": uname,
             "password": passwd,
-            "public_key": Encryption.serialize_public_key(publickey),
-            "Nonce": "Nonce",
+            "nonce": "Nonce",
             }
         }
-        # data_to_send = "{'cmd':'register','uname':'%s','passwd':'%s'}"%(uname,passwd)
-        # cipher = encryption.encrypt(data_to_send,"serverkey.pem",publickey=None) #encrypt with server's public key
-        # signature = encryption.signature(data_to_send,"keypriv")
-        # outp = "{'cipher':%s,'signature':%s}"%(data_to_send,data_to_send)
 
         sock.send(Encryption.asymmetric_encrypt(json.dumps(data_to_send), fname=None, publickey=server_pkey))
         response = json.loads(sock.recv(2048).decode())
-        if(response["status"]=="SUCC"):
+        plain = Encryption.asymmetric_decrypt(response["cipher"], fname=None, privatekey=privatekey)
+        signature = response["signature"]
+
+        if Encryption.check_authenticity(plain, signature=signature, public_key=server_pkey) and \
+        response["status"]=="SUCC" and plain['nonce'] == "Nonce":
             print(bcolors.OKGREEN + f"Successfuly registerd as {uname}" + bcolors.ENDC)
             return 0
         else:
@@ -114,7 +113,7 @@ def handshake():
         response = json.loads(sock.recv(2048).decode())
         plain = Encryption.asymmetric_decrypt(response["cipher"], fname=None, privatekey=privatekey)
         signature = response["signature"]
-        if Encryption.verify_signature(plain, signature, fname=None, publickey=server_pkey) == 0:
+        if Encryption.verify_signature(plain, signature, fname=None, publickey=server_pkey) == 0 and plain['status'] == 'SUCC':
             return 1
         else:
             return 0
