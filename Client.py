@@ -41,8 +41,8 @@ def login():
     pass
 
 
-def send(resp,c):
-    c.sendall(resp.encode())
+def send(resp):
+    sock.sendall(resp.encode())
 
 def register():
     global username
@@ -62,22 +62,32 @@ def register():
             "plain": {
             "username": uname,
             "password": passwd,
-            "nonce": "Nonce",
-            }
+            "pbkey": Encryption.serialize_public_key(publickey),
+            },
+            "nonce": "Nonce"
         }
 
-        sock.send(Encryption.asymmetric_encrypt(json.dumps(data_to_send), fname=None, publickey=server_pkey))
-        response = json.loads(sock.recv(MAX_SIZE))
-        plain = Encryption.asymmetric_decrypt(response["cipher"], fname=None, privatekey=privatekey)
-        signature = response["signature"]
+        send(Encryption.asymmetric_encrypt(json.dumps(data_to_send), fname=None, publickey=server_pkey))
+        '''
+        response = {
+        cipher: "cipher",
+        signature: "signature",
+        }
+        '''
+        response = json.loads(sock.recv(MAX_SIZE).decode())
+        print(response)
+        plain = Encryption.asymmetric_dycrypt(response["cipher"], privatekey=privatekey)
 
-        if Encryption.check_authenticity(plain, signature=signature, public_key=server_pkey) and \
-        response["status"]=="SUCC" and plain['nonce'] == "Nonce":
-            print(bcolors.OKGREEN + f"Successfuly registerd as {uname}" + bcolors.ENDC)
-            return 0
-        else:
-            print(bcolors.FAIL+"Could not register. Please try again."+bcolors.ENDC)
-            return -1
+        print(plain)
+        # signature = response["signature"]
+
+        # if Encryption.check_authenticity(plain, signature=signature, public_key=server_pkey) and \
+        # response["status"]=="SUCC" and plain['nonce'] == "Nonce":
+        #     print(bcolors.OKGREEN + f"Successfuly registerd as {uname}" + bcolors.ENDC)
+        #     return 0
+        # else:
+        #     print(bcolors.FAIL+"Could not register. Please try again."+bcolors.ENDC)
+        #     return -1
     except Exception as e:
         print(e)
         print(bcolors.FAIL+"Couldn't communicate with the server :("+bcolors.ENDC)
@@ -97,11 +107,13 @@ def clear_screen():
     os.system('cls' if os.name == 'nt' else 'clear')
 
 
+
+# Initial authentication of the server.
 def handshake():
 
     global publickey, privatekey, server_pkey
 
-    publickey, privatekey = Encryption.genkeys(512)
+    publickey, privatekey = Encryption.genkeys(512 * 2)
 
     data_to_send = {
         "type": "handshake",
@@ -109,7 +121,7 @@ def handshake():
     }
 
     try: 
-        send(Encryption.asymmetric_encrypt(json.dumps(data_to_send), fname=None, publickey=server_pkey), sock)
+        send(Encryption.asymmetric_encrypt(json.dumps(data_to_send), fname=None, publickey=server_pkey))
         response = json.loads(sock.recv(MAX_SIZE).decode())
         plain = json.loads(response['cipher'])
         signature = response["signature"]
@@ -154,12 +166,14 @@ def show_menu():
             print(bcolors.OKGREEN+command+bcolors.BOLD+" " + commands[command]+bcolors.ENDC)
         print('\n')
         command = input()
-        if command == ":register":
-            register()
-        else:
+        if command not in commands.keys():
             print(bcolors.FAIL+"Invalid command!"+bcolors.ENDC)
             time.sleep(1)
-            continue
+            continue 
+        elif command == ":register":
+            register()
+        elif command == ':login':
+            login()
 
 
 

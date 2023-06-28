@@ -54,6 +54,9 @@ def symmetric_decrypt(ciphertext, tag, nonce, key):
     
 def asymmetric_encrypt(text,fname,publickey):
 
+    print('dorsa')
+    print(text, type(text), publickey)
+
     ciphertext = publickey.encrypt(
     text.encode(FORMAT),
     padding.OAEP(
@@ -113,9 +116,10 @@ def serialize_public_key(public_key):
         encoding=serialization.Encoding.PEM,
         format=serialization.PublicFormat.PKCS1)
     
-    return pem
+    return pem.decode(FORMAT)
 
 def deserialize_public_key(public_key):
+    public_key = public_key.encode(FORMAT)
     return serialization.load_pem_public_key(public_key) 
     
 

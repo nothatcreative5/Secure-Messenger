@@ -20,6 +20,7 @@ sock.listen(10)
 
 pub_key = None
 private_key = None
+MAX_SIZE = 65536
 
 connections = list()
 authorized_users = dict()
@@ -34,9 +35,8 @@ def makedb():
         sql = '''
         CREATE TABLE IF NOT EXISTS Users(
             username NOT NULL PRIMARY KEY,
-            h_password,
-            public_key,
-            salt);
+            password,
+            public_key);
         CREATE TABLE IF NOT EXISTS Messages(
             user1,
             user2,
@@ -60,35 +60,49 @@ def makedb():
         cur.executescript(sql)
         conn.close()
 
+def get_pbkey(uname):
+    conn = sqlite3.connect('users.db')
+    cur = conn.cursor()
+    sql = "SELECT public_key from Users where username='%s'"%uname
+    cur.execute(sql)
+    pbkey = cur.fetchone()[0]
+    conn.close()
+    return pbkey
+
 def send(resp,c):
     c.sendall(resp.encode())
 
 
 def register(plain,c):
+    # sys.exit(-1)
     conn = sqlite3.connect('users.db')
     uname = plain["username"]
     passwd = plain["password"]
-    pub_key = plain["public_key"]
+    pub_key = plain["pbkey"]
 
     cursor = conn.execute("SELECT username from users where username='%s'"%(uname))
     rowcount = len(cursor.fetchall())
+
+    # sys.exit(-1)
     
-    if len(rowcount) > 0:
+    if rowcount > 0:
         return -1
 
     else:
         try:
-            salt = int.from_bytes(os.urandom(16), byteorder="big")
-            salt_pass = f'{passwd}{salt}'.encode()
-            h_password = hashlib.sha256(salt_pass).hexdigest()
-            conn.execute("INSERT INTO Users(username,h_password,public_key,salt) values('%s','%s','%s','%s')"%(uname,h_password,pub_key,salt))
-            conn.commit()
+            # Server is secure, so why?
+            # salt = int.from_bytes(os.urandom(16), byteorder="big")
+            # salt_pass = f'{passwd}{salt}'.encode()
+            # h_password = hashlib.sha256(salt_pass).hexdigest()
+            # conn.execute("INSERT INTO Users(username,password,public_key) values('%s','%s','%s')"%(uname,passwd,pub_key))
+            # conn.commit()
             conn.close()
             authorized_users[uname] = c
-            client_keys[uname] = pub_key
-            return 0
+            # client_keys[uname] = pub_key
+            # print('an')
+            return get_pbkey(uname)
         except Exception:
-            return -1
+            return None
 
     # try:
 
@@ -126,7 +140,7 @@ def new_connection(c, a):
     global authorized_users
     while True:
         try:
-            payload = c.recv(1024).decode()
+            payload = c.recv(MAX_SIZE).decode()
             # payload = json.loads(c.recv(1024).decode())
         except Exception as e:
             print("Error - %s"%e)
@@ -144,15 +158,21 @@ def new_connection(c, a):
                 payload = json.loads(Encryption.asymmetric_dycrypt(payload, private_key))
                 if payload['type'] == 'register':
                     plain = payload['plain']
-                    nonce = plain['nonce']
-                    stat = register(plain, c)
-                    if(stat == 0):
-                        outp = "{'command: 'register', 'status': SUCC, 'nonce': %s}"%nonce
-                    else:
-                        outp = "{'command: 'register', 'status': FAIL, 'nonce': %s}"%nonce
+                    nonce = payload['nonce']
+                    pbkey = register(plain, c)
+                    outp = "{command: 'register', 'status': SUCC, 'nonce': %s}"%nonce
+
+                    outp = {
+                        'command': 'register',
+                        'status': 'SUCC',
+                        'nonce': nonce
+                    }
+                    pbkey = Encryption.deserialize_public_key(plain["pbkey"])
+                    if pbkey is None: 
+                        return -1
                     
-                    signature = Encryption.signature(outp, private_key)
-                    cipher = Encryption.asymmetric_encrypt(outp, fname=None, publickey=client_keys[c])
+                    signature = Encryption.signature(json.dumps(outp), private_key)
+                    cipher = Encryption.asymmetric_encrypt(json.dumps(outp), fname=None, publickey=pbkey)
                     response = {'cipher': cipher, 'signature': signature}
                     send(json.dumps(response), c)
 
@@ -168,6 +188,7 @@ def new_connection(c, a):
 
 
             except Exception as e:
+                raise e
                 print("Error - %s"%e)
                 exit(-1)
 
