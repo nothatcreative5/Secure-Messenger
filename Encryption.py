@@ -10,6 +10,10 @@ import ast
 import hashlib
 from cryptography.hazmat.primitives import serialization
 import codecs
+
+
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+
 from base64 import (
     b64encode,
     b64decode,
@@ -36,20 +40,20 @@ def genkeys(size):
     return public_key, private_key
 
 
-def symmetric_encrypt(text, key):
-    cipher = AES.new(key, AES.MODE_EAX)
-    ciphertext, tag = cipher.encrypt_and_digest(text)
-    return ciphertext, tag, cipher.nonce
+# def symmetric_encrypt(text, key):
+#     cipher = AES.new(key, AES.MODE_EAX)
+#     ciphertext, tag = cipher.encrypt_and_digest(text)
+#     return ciphertext, tag, cipher.nonce
 
-def symmetric_decrypt(ciphertext, tag, nonce, key):
-    cipher = AES.new(key, AES.MODE_EAX, nonce)
-    plaintext = cipher.decrypt(ciphertext)
-    try:
-        cipher.verify(tag)
-        return plaintext
-    except ValueError:
-        print("Key incorrect or message corrupted")
-        return None
+# def symmetric_decrypt(ciphertext, tag, nonce, key):
+#     cipher = AES.new(key, AES.MODE_EAX, nonce)
+#     plaintext = cipher.decrypt(ciphertext)
+#     try:
+#         cipher.verify(tag)
+#         return plaintext
+#     except ValueError:
+#         print("Key incorrect or message corrupted")
+#         return None
  
     
 def asymmetric_encrypt(text,fname,publickey):
@@ -120,4 +124,26 @@ def deserialize_public_key(public_key):
     return serialization.load_pem_public_key(public_key) 
     
 
-    
+
+def gen_sym_key(key, nonce):
+    # https://cryptography.io/en/latest/hazmat/primitives/symmetric-encryption/
+
+    # key = os.urandom(32)
+    # nonce = os.urandom(16)
+
+    algorithm = algorithms.ChaCha20(key, nonce)
+    cipher = Cipher(algorithm, mode=None)
+
+    return cipher
+
+
+def sym_encrypt(text, cipher):
+    text = text.encode(FORMAT)
+    encryptor = cipher.encryptor()
+    ciphertext = encryptor.update(text) + encryptor.finalize()
+    return ciphertext.decode(FORMAT)
+
+def sym_decrypt(ciphertext, cipher):
+    decryptor = cipher.decryptor()
+    plaintext = decryptor.update(ciphertext.encode(FORMAT))
+    return plaintext.decode(FORMAT)

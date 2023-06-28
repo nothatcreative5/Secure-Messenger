@@ -25,6 +25,9 @@ username = ""
 password = ""
 MAX_SIZE = 65536
 
+
+FORMAT = 'latin-1'
+
 sock = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
 server_sock = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
 
@@ -34,6 +37,8 @@ chats = {}
 publickey = None
 privatekey = None
 username = None
+
+LTK = None
 
 server_pkey = None
 
@@ -75,20 +80,15 @@ def register():
         }
         '''
         response = json.loads(sock.recv(MAX_SIZE).decode())
-        print(response)
         plain = Encryption.asymmetric_dycrypt(response["cipher"], privatekey=privatekey)
 
-        print(plain, type(plain))
         signature = response["signature"]
 
-        a = Encryption.check_authenticity(plain, signature=signature, public_key=server_pkey) 
-        print(json.loads(plain))
 
         if Encryption.check_authenticity(plain, signature=signature, public_key=server_pkey) == 0 and \
         json.loads(plain)["status"]=="SUCC" and json.loads(plain)['nonce'] == "Nonce":
             clear_screen()
             print(bcolors.OKGREEN + f"Successfuly registerd as {uname}" + bcolors.ENDC)
-            commands = account_page.copy()
             return 0
         else:
             print(bcolors.FAIL+"Could not register. Please try again."+bcolors.ENDC)
@@ -97,6 +97,60 @@ def register():
         print(e)
         print(bcolors.FAIL+"Couldn't communicate with the server :("+bcolors.ENDC)
         return 0
+    
+
+def login():
+    global LTK, commands
+
+    uname = input(bcolors.OKBLUE+"Choose a username : "+bcolors.ENDC)
+    passwd = getpass.getpass(bcolors.OKBLUE+"Enter Password : "+bcolors.ENDC)
+
+    try:
+        key = os.urandom(32)
+        nonce = os.urandom(16)
+        LTK = Encryption.gen_sym_key(key, nonce)
+
+        data_to_send = {
+            "type": "login",
+            "plain": {
+            "username": uname,
+            "password": passwd,
+            "LTK": [key.decode(FORMAT), nonce.decode(FORMAT)]
+            },
+            "nonce": "Nonce"
+        }
+
+        send(Encryption.asymmetric_encrypt(json.dumps(data_to_send), fname=None, publickey=server_pkey))
+        '''
+        response = {
+        cipher: "cipher",
+        signature: "signature",
+        }
+        '''
+        response = json.loads(sock.recv(MAX_SIZE).decode())
+        # plain = Encryption.asymmetric_dycrypt(response["cipher"], privatekey=privatekey)
+        plain = Encryption.sym_decrypt(response["cipher"], LTK)
+
+        print('dorsa', plain, type(json.loads(plain)))
+        print(json.loads(plain)["status"])
+        print('kir')
+
+        signature = response["signature"]
+
+        if Encryption.check_authenticity(plain, signature=signature, public_key=server_pkey) == 0 and \
+        json.loads(plain)["status"]=="SUCC" and json.loads(plain)['nonce'] == "Nonce":
+            clear_screen()
+            print(bcolors.OKGREEN + f"Successfuly logged in as {uname}" + bcolors.ENDC)
+            commands = account_page.copy()
+            return 0
+        else:
+            print(bcolors.FAIL+"Could not login. Please try again."+bcolors.ENDC)
+            return -1
+    except Exception as e:
+        print(e)
+        print(bcolors.FAIL+"Couldn't communicate with the server :("+bcolors.ENDC)
+        return 0
+
 
     
 
@@ -196,4 +250,3 @@ if __name__ == "__main__":
         key_file.read())
     
     start_client()
-

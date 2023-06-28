@@ -22,6 +22,8 @@ pub_key = None
 private_key = None
 MAX_SIZE = 65536
 
+FORMAT = 'latin-1'
+
 connections = list()
 authorized_users = dict()
 client_keys= dict()
@@ -73,12 +75,9 @@ def send(resp,c):
     c.sendall(resp.encode())
 
 
-def register(plain,c):
+def register(uname, passwd, pub_key):
     # sys.exit(-1)
     conn = sqlite3.connect('users.db')
-    uname = plain["username"]
-    passwd = plain["password"]
-    pub_key = plain["pbkey"]
 
     cursor = conn.execute("SELECT username from users where username='%s'"%(uname))
     rowcount = len(cursor.fetchall())
@@ -101,11 +100,22 @@ def register(plain,c):
             return get_pbkey(uname)
         except Exception:
             return None
+        
+
+def login(uname, passwd):
+    conn = sqlite3.connect('users.db')
+    cursor = conn.execute("SELECT username from users where username='%s' and password='%s'"%(uname,passwd))
+    rowcount = len(cursor.fetchall())
+    conn.close()
+    if rowcount > 0:
+        return 1
+    else:
+        return 0
 
 
 def new_connection(c, a):
     #Accept data from the client
-    global authorized_users
+    global authorized_users, client_keys
     while True:
         try:
             payload = c.recv(MAX_SIZE).decode()
@@ -127,8 +137,7 @@ def new_connection(c, a):
                 if payload['type'] == 'register':
                     plain = payload['plain']
                     nonce = payload['nonce']
-                    pbkey = register(plain, c)
-                    outp = "{command: 'register', 'status': SUCC, 'nonce': %s}"%nonce
+                    pbkey = register(plain['username'], plain['password'], plain['pbkey'])
 
                     outp = {
                         'command': 'register',
@@ -146,6 +155,41 @@ def new_connection(c, a):
                     response = {'cipher': cipher, 'signature': signature}
                     send(json.dumps(response), c)
                     print('User registered successfully!')
+
+                elif payload['type'] == 'login':
+                    plain = payload['plain']
+                    [key, nonce] = plain['LTK']
+                    key = key.encode(FORMAT)
+                    nonce = nonce.encode(FORMAT) 
+
+                    LTK = Encryption.gen_sym_key(key, nonce)
+                    
+                    nonce = payload['nonce']
+                    uname = plain['username']
+
+                    result = login(plain['username'], plain['password'])
+
+                    outp = {
+                        'command': 'login',
+                        'status': 'SUCC',
+                        'nonce': nonce
+                    }
+
+                    if result == 1:
+                        client_keys[uname] = LTK
+                        authorized_users[uname] = c
+                    
+                    signature = Encryption.signature(json.dumps(outp), private_key)
+                    cipher = Encryption.sym_encrypt(json.dumps(outp), LTK)
+                    response = {'cipher': cipher, 'signature': signature}
+                    send(json.dumps(response), c)
+                    print('User logged in successfully!')
+                    
+
+
+                        
+
+
 
                 elif payload['type'] == 'handshake':
                     nonce = payload['nonce']
