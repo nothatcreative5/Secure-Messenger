@@ -54,9 +54,6 @@ def symmetric_decrypt(ciphertext, tag, nonce, key):
     
 def asymmetric_encrypt(text,fname,publickey):
 
-    print('dorsa')
-    print(text, type(text), publickey)
-
     ciphertext = publickey.encrypt(
     text.encode(FORMAT),
     padding.OAEP(

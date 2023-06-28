@@ -67,7 +67,7 @@ def get_pbkey(uname):
     cur.execute(sql)
     pbkey = cur.fetchone()[0]
     conn.close()
-    return pbkey
+    return Encryption.deserialize_public_key(pbkey)
 
 def send(resp,c):
     c.sendall(resp.encode())
@@ -94,46 +94,14 @@ def register(plain,c):
             # salt = int.from_bytes(os.urandom(16), byteorder="big")
             # salt_pass = f'{passwd}{salt}'.encode()
             # h_password = hashlib.sha256(salt_pass).hexdigest()
-            # conn.execute("INSERT INTO Users(username,password,public_key) values('%s','%s','%s')"%(uname,passwd,pub_key))
-            # conn.commit()
+            conn.execute("INSERT INTO Users(username,password,public_key) values('%s','%s','%s')"%(uname,passwd,pub_key))
+            conn.commit()
             conn.close()
-            authorized_users[uname] = c
-            # client_keys[uname] = pub_key
-            # print('an')
+
             return get_pbkey(uname)
         except Exception:
             return None
 
-    # try:
-
-    #     # cursor = conn.execute("SELECT username from users where username='%s'"%(uname))
-    #     # rowcount = len(cursor.fetchall())
-    #     # print("Number of usrs with the username %s : "%uname,rowcount)
-    #     # if(rowcount==1):
-    #     #     #User exists
-    #     #     outp = "{'resp_type':'FAIL','resp':'Username already exists'}"
-    #     #     outp = Payload()
-    #     #     outp.type = Payload.Type.Register
-    #     #     outp.status = "FAIL"
-    #     #     outp.additional_information = "Username already exists"
-
-    #     #     send(outp,c)
-    #     # elif(rowcount==0):
-    #     #     #Username available
-    #     #     conn.execute("INSERT INTO users(username,password) values('%s','%s')"%(uname,passwd))
-    #     #     conn.commit()
-    #     #     conn.close()
-    #     #     authorized_users[uname] = c
-    #     #     print("User created!")
-    #     #     outp = "{'resp_type':'SUCC','resp':'User created!'}"
-    #     #     send(outp,c)
-            
-        
-    # except Exception as e:
-    #     print("Error - %s"%e)
-    #     outp = b"{'resp_type':'FAIL','resp':'%s'}"%e
-    #     send(outp,c)
-    #     c.close()
 
 def new_connection(c, a):
     #Accept data from the client
@@ -167,19 +135,20 @@ def new_connection(c, a):
                         'status': 'SUCC',
                         'nonce': nonce
                     }
-                    pbkey = Encryption.deserialize_public_key(plain["pbkey"])
+                    # pbkey = Encryption.deserialize_public_key(plain["pbkey"])
+
                     if pbkey is None: 
+                        print('Failed to register user')
                         return -1
                     
                     signature = Encryption.signature(json.dumps(outp), private_key)
                     cipher = Encryption.asymmetric_encrypt(json.dumps(outp), fname=None, publickey=pbkey)
                     response = {'cipher': cipher, 'signature': signature}
                     send(json.dumps(response), c)
+                    print('User registered successfully!')
 
                 elif payload['type'] == 'handshake':
                     nonce = payload['nonce']
-                    # pkey = Encryption.deserialize_public_key(plain['public_key'].encode())
-                    # print(type(pkey))
                     outp = '{"command": "handshake", "status": "SUCC", "nonce": "%s"}'%nonce
                     signature = Encryption.signature(outp, private_key)
                     response = {'cipher': outp, 'signature': signature}

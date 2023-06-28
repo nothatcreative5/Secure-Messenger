@@ -45,7 +45,7 @@ def send(resp):
     sock.sendall(resp.encode())
 
 def register():
-    global username
+    global username, commands
     while True:
         uname = input(bcolors.OKBLUE+"Choose a username : "+bcolors.ENDC)
         passwd = getpass.getpass(bcolors.OKBLUE+"Enter Password : "+bcolors.ENDC)
@@ -78,16 +78,21 @@ def register():
         print(response)
         plain = Encryption.asymmetric_dycrypt(response["cipher"], privatekey=privatekey)
 
-        print(plain)
-        # signature = response["signature"]
+        print(plain, type(plain))
+        signature = response["signature"]
 
-        # if Encryption.check_authenticity(plain, signature=signature, public_key=server_pkey) and \
-        # response["status"]=="SUCC" and plain['nonce'] == "Nonce":
-        #     print(bcolors.OKGREEN + f"Successfuly registerd as {uname}" + bcolors.ENDC)
-        #     return 0
-        # else:
-        #     print(bcolors.FAIL+"Could not register. Please try again."+bcolors.ENDC)
-        #     return -1
+        a = Encryption.check_authenticity(plain, signature=signature, public_key=server_pkey) 
+        print(json.loads(plain))
+
+        if Encryption.check_authenticity(plain, signature=signature, public_key=server_pkey) == 0 and \
+        json.loads(plain)["status"]=="SUCC" and json.loads(plain)['nonce'] == "Nonce":
+            clear_screen()
+            print(bcolors.OKGREEN + f"Successfuly registerd as {uname}" + bcolors.ENDC)
+            commands = account_page.copy()
+            return 0
+        else:
+            print(bcolors.FAIL+"Could not register. Please try again."+bcolors.ENDC)
+            return -1
     except Exception as e:
         print(e)
         print(bcolors.FAIL+"Couldn't communicate with the server :("+bcolors.ENDC)
