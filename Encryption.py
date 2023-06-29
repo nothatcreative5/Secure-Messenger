@@ -1,11 +1,3 @@
-import Crypto
-from Crypto.PublicKey import RSA
-from Crypto import Random
-from Crypto.Hash import SHA256
-from Crypto.Signature import PKCS1_v1_5
-from Crypto.PublicKey import RSA
-from Crypto.Cipher import PKCS1_OAEP
-from Crypto.Cipher import AES
 import ast
 import hashlib
 from cryptography.hazmat.primitives import serialization
@@ -96,7 +88,7 @@ def signature(text, private):
     return signature.decode(FORMAT)
     
 
-def check_authenticity(text,signature,public_key):
+def check_authenticity(text, signature, public_key):
     try:
         # text = text.encode(FORMAT)
         public_key.verify(

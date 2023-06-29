@@ -42,8 +42,6 @@ LTK = None
 
 server_pkey = None
 
-def login():
-    pass
 
 
 def send(resp):
@@ -100,7 +98,7 @@ def register():
     
 
 def login():
-    global LTK, commands
+    global LTK, commands, username
 
     uname = input(bcolors.OKBLUE+"Choose a username : "+bcolors.ENDC)
     passwd = getpass.getpass(bcolors.OKBLUE+"Enter Password : "+bcolors.ENDC)
@@ -140,6 +138,7 @@ def login():
         json.loads(plain)["status"]=="SUCC" and json.loads(plain)['nonce'] == "Nonce":
             clear_screen()
             print(bcolors.OKGREEN + f"Successfuly logged in as {uname}" + bcolors.ENDC)
+            username = uname
             commands = account_page.copy()
             return 0
         else:
@@ -151,6 +150,50 @@ def login():
         return 0
 
 
+def show_online():
+    global server_pkey
+    nonce = random.randint(100000, 999999)
+    data_to_send = {
+        "type": "show_online",
+        "nonce": nonce,
+        "user": username
+    }
+    print(data_to_send)
+    send(Encryption.asymmetric_encrypt(json.dumps(data_to_send), fname=None, publickey=server_pkey))
+    response = json.loads(sock.recv(MAX_SIZE).decode())
+    plain = Encryption.sym_decrypt(response["cipher"], LTK)
+    plain = json.loads(plain)
+    print(plain)
+    signature = response["signature"]
+    if plain["status"]=="SUCC" and plain['nonce'] == nonce + 1:
+        clear_screen()
+        print(bcolors.OKGREEN + f"Online users : {', '.join(plain['online_users'])}" + bcolors.ENDC)
+        return 0
+    else:
+        print(bcolors.FAIL+"Could not get online users. Please try again."+bcolors.ENDC)
+        return -1
+    
+def logout():
+    global server_pkey, commands
+    nonce = random.randint(100000, 999999)
+    data_to_send = {
+        "type": "logout",
+        "nonce": nonce,
+        "user": username
+    }
+    send(Encryption.asymmetric_encrypt(json.dumps(data_to_send), fname=None, publickey=server_pkey))
+    response = json.loads(sock.recv(MAX_SIZE).decode())
+    plain = Encryption.sym_decrypt(response["cipher"], LTK)
+    plain = json.loads(plain)
+    signature = response["signature"]
+    if plain["status"]=="SUCC" and plain['nonce'] == nonce + 1:
+        clear_screen()
+        print(bcolors.OKGREEN + f"Successfuly logged out." + bcolors.ENDC)
+        commands = main_page.copy()
+        return 0
+    else:
+        print(bcolors.FAIL+"Could not logout. Please try again."+bcolors.ENDC)
+        return -1
     
 
 
@@ -232,7 +275,10 @@ def show_menu():
             register()
         elif command == ':login':
             login()
-
+        elif command == ':showonline':
+            show_online()
+        elif command == ':logout':
+            logout()
 
 
 def start_client():
