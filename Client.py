@@ -131,7 +131,6 @@ def login():
         # plain = Encryption.asymmetric_dycrypt(response["cipher"], privatekey=privatekey)
         plain = Encryption.sym_decrypt(response["cipher"], LTK)
 
-        print('dorsa', plain, type(json.loads(plain)))
         print(json.loads(plain)["status"])
         print('kir')
 
