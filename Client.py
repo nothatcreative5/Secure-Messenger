@@ -208,7 +208,8 @@ account_page = {":chat" : "Chat with an online user",":showonline" : "Show onlin
 commands = main_page.copy()
 
 def clear_screen():
-    os.system('cls' if os.name == 'nt' else 'clear')
+    pass
+    # os.system('cls' if os.name == 'nt' else 'clear')
 
 
 
@@ -308,15 +309,15 @@ def initiate_chat():
         response = {
             "type": "Exchange",
             # "parameters": [p, g],
-            # "public_df_key": public_df_key,
+            "public_df_key": public_df_key,
             "from": username,
             "to": peer,
             "nonce": nonce
         }        
 
-        signature = Encryption.signature(json.dumps(response), user_keys[username][1])
-        print(signature)
-        cipher = Encryption.asymmetric_encrypt(json.dumps(signature), fname=None, publickey=Encryption.deserialize_public_key(peer_pbkey))
+        # signature = Encryption.signature(json.dumps(response), user_keys[username][1])
+        # print(signature)
+        cipher = Encryption.asymmetric_encrypt(json.dumps(response), fname=None, publickey=Encryption.deserialize_public_key(peer_pbkey))
         print(cipher)
         print('meimon')
 
