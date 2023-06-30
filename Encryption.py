@@ -70,27 +70,32 @@ def get_diffie_hellman_key(parameters, pbkey):
 
 
     
-def asymmetric_encrypt(text,fname,publickey):
-
-    ciphertext = publickey.encrypt(
-    text.encode(FORMAT),
-    padding.OAEP(
-        mgf=padding.MGF1(algorithm=hashes.SHA256()),
-        algorithm=hashes.SHA256(),
-        label=None
-    ))
-    return ciphertext.decode(FORMAT)
+def asymmetric_encrypt(text, fname, publickey, max_size=1024):
+    chunks = [text[i:i+max_size] for i in range(0, len(text), max_size)]
+    ciphertext = []
+    for chunk in chunks:
+        chunk_ciphertext = publickey.encrypt(
+            chunk.encode(FORMAT),
+            padding.OAEP(
+                mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None
+            ))
+        ciphertext.append(chunk_ciphertext.decode(FORMAT))
+    return ciphertext
     
-def asymmetric_dycrypt(cipher,privatekey):
-    cipher = cipher.encode(FORMAT)
-    plaintext = privatekey.decrypt(
-    cipher,
-    padding.OAEP(
-        mgf=padding.MGF1(algorithm=hashes.SHA256()),
-        algorithm=hashes.SHA256(),
-        label=None
-    ))
-    return plaintext.decode(FORMAT)
+def asymmetric_dycrypt(cipher, privatekey, max_size=1024):
+    plaintext = ''
+    for chunk in cipher:
+        plaintext_chunk = privatekey.decrypt(
+            chunk,
+            padding.OAEP(
+                mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None
+            ))
+        plaintext += plaintext_chunk.decode(FORMAT)
+    return plaintext
 
 
 

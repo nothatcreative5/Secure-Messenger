@@ -160,7 +160,6 @@ def new_connection(c, a):
                     # pbkey = Encryption.deserialize_public_key(plain["pbkey"])
 
                     if pbkey is None: 
-                        response  
                         print('Failed to register user')
                         return -1
                     
