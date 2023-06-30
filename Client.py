@@ -454,13 +454,14 @@ def initiate_chat():
 
             send(server_cipher)
 
-            response = json.loads(sock.recv(MAX_SIZE).decode())
+            response = sock.recv(MAX_SIZE).decode()
             response = Encryption.sym_decrypt(response, LTK)
+            response = json.loads(response)
             if response["type"] == "ReExchange" and response["to"] == username and response["from"] == peer:
                 print(response["type"])
                 cipher = response["cipher"]
                 peer_public_df_key = Encryption.sym_decrypt(cipher, shared_key_1)
-
+                peer_public_df_key = serialization.load_der_public_key(peer_public_df_key.encode(FORMAT))
                 sender_chats[peer]["peer_public_df_key"] = peer_public_df_key
             
                 next_cipher, next_public_df_key, next_private_df_key = Encryption.get_next_DH_key(parameters, peer_public_df_key, private_df_key)
