@@ -74,6 +74,8 @@ def get_pbkey(uname):
 def send(resp,c):
     c.sendall(resp.encode())
 
+def send_to_side_sock(resp, user):
+    authorized_users[user]["side_sock"].sendall(resp.encode())
 
 def register(uname, passwd, pub_key):
     # sys.exit(-1)
@@ -141,7 +143,7 @@ def new_connection(c, a):
             print("Connection closed by client.\n")
             del connections[connections.index(c)]
             del client_keys[c]
-            authorized_users = {k: v for k, v in authorized_users.items() if v != c}
+            authorized_users = {k: v for k, v in authorized_users.items() if v["main_sock"] != c}
             break
 
         else:
@@ -193,7 +195,11 @@ def new_connection(c, a):
 
                         if result == 1:
                             client_keys[c] = LTK
-                            authorized_users[uname] = c
+                            main_sock = c
+                            side_port = payload['side_port']
+                            side_sock = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+                            side_sock.connect(('127.0.0.1', side_port))
+                            authorized_users[uname] = {'main_sock': main_sock, 'side_sock': side_sock}
                             signature = Encryption.signature(json.dumps(outp), private_key)
                             cipher = Encryption.sym_encrypt(json.dumps(outp), LTK)
                             response = {'cipher': cipher, 'signature': signature, 'status' : 'SUCC'}
@@ -234,7 +240,7 @@ def new_connection(c, a):
                     response = {'cipher': cipher, 'signature': signature}
                     send(json.dumps(response), c)
                     del connections[connections.index(c)]
-                    authorized_users = {k: v for k, v in authorized_users.items() if v != c}
+                    authorized_users = {k: v for k, v in authorized_users.items() if v["main_sock"] != c}
                     print('User logged out successfully!')
 
                 elif payload['type'] == 'handshake':
@@ -250,7 +256,7 @@ def new_connection(c, a):
                     nonce = payload['nonce']
                     from_ = payload['from']
 
-                    peer_pbkey = get_pbkey(peer)
+                    peer_pbkey = Encryption.serialize_public_key(get_pbkey(peer))
 
                     response = {
                         'command': 'initiate_chat',
@@ -260,9 +266,23 @@ def new_connection(c, a):
                     }
                     client_key = client_keys[c]
                     signature = Encryption.signature(json.dumps(response), private_key)
-                    cipher = Encryption.asymmetric_encrypt(json.dumps(response), fname=None, publickey=client_key)
+                    cipher = Encryption.sym_encrypt(json.dumps(response), publickey=client_key)
                     response = {'cipher': cipher, 'signature': signature}
                     send(json.dumps(response), c)
+                elif payload['type'] == "Exchange":
+                    peer = payload['to']
+                    from_ = payload['from']
+                    cipher = payload['cipher']
+
+                    response = {
+                        "type": "Exchange",
+                        "cipher": cipher
+                    }
+                    Encryption.sym_encrypt(json.dumps(response), client_keys[authorized_users[peer]['main_sock']])
+
+                    send_to_side_sock(cipher, peer)
+
+
 
 
 
@@ -274,13 +294,36 @@ def new_connection(c, a):
 
 if __name__ == "__main__":
     makedb()
-    pub_key, private_key =  Encryption.genkeys(4096)
-    pem = pub_key.public_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PublicFormat.PKCS1)
-    f = open("spubkey.pem","wb")
-    f.write(pem)
-    f.close()
+    # if spubkey exists, load it
+    if os.path.exists("spubkey.pem") and os.path.exists("sprivkey.pem"):
+        f = open("spubkey.pem","rb")
+        pub_key = serialization.load_pem_public_key(
+            f.read(),
+            backend=default_backend()
+        )
+        f.close()
+        f = open("sprivkey.pem","rb")
+        private_key = serialization.load_pem_private_key(
+            f.read(),
+            password=None,
+            backend=default_backend()
+        )
+        f.close()
+    else:
+        pub_key, private_key =  Encryption.genkeys(4096)
+        pem = pub_key.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.PKCS1)
+        f = open("spubkey.pem","wb")
+        f.write(pem)
+        f.close()
+        pem = private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption())
+        f = open("sprivkey.pem","wb")
+        f.write(pem)
+        f.close()
     
     while True:
         c,a = sock.accept()

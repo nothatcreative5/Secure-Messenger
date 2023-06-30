@@ -119,7 +119,8 @@ def login():
             "password": passwd,
             "LTK": [key.decode(FORMAT), iv.decode(FORMAT)]
             },
-            "nonce": "Nonce"
+            "nonce": "Nonce",
+            "side_port": int(sys.argv[1])
         }
 
         send(Encryption.asymmetric_encrypt(json.dumps(data_to_send), fname=None, publickey=server_pkey))
@@ -362,7 +363,7 @@ def show_menu():
         elif command == ':chat':
             initiate_chat()
 
-def handle_chat(socket, address):
+def side_thread(socket, address):
     global chats
 
     while True:
@@ -374,29 +375,31 @@ def handle_chat(socket, address):
 
             if data['type'] == 'Exchange':
                 plain = Encryption.sym_decrypt(data['cipher'], user_keys[username][2])
-                signature = data['signature']
-                if Encryption.check_authenticity(plain, signature, user_keys[username][1]) == 0:
-                    parameters = plain['parameters']
-                    peer = parameters['peer']
-                    from_ = parameters['from']
-                    pbkey = parameters['pbkey']
+                print(plain)
 
-                    if peer not in chats:
-                        shared_key, new_pbkey = Encryption.get_diffie_hellman_key(parameters ,pbkey)
-                        # Messages and current key
-                        chats[peer] = [[], shared_key] 
-                        output = {
-                            "type": "Exchange",
-                            'pbkey' : new_pbkey,
-                            'from' : peer,
-                            'peer' : from_,
-                        }
-                        output = json.dumps(output)
-                        output = Encryption.sym_encrypt(output, shared_key)
-                        socket.sendall(output.encode())
-                else:
-                    print(bcolors.FAIL+"Authentication failed!"+bcolors.ENDC)
-                    break
+                # signature = data['signature']
+                # if Encryption.check_authenticity(plain, signature, user_keys[username][1]) == 0:
+                #     parameters = plain['parameters']
+                #     peer = parameters['peer']
+                #     from_ = parameters['from']
+                #     pbkey = parameters['pbkey']
+
+                #     if peer not in chats:
+                #         shared_key, new_pbkey = Encryption.get_diffie_hellman_key(parameters ,pbkey)
+                #         # Messages and current key
+                #         chats[peer] = [[], shared_key] 
+                #         output = {
+                #             "type": "Exchange",
+                #             'pbkey' : new_pbkey,
+                #             'from' : peer,
+                #             'peer' : from_,
+                #         }
+                #         output = json.dumps(output)
+                #         output = Encryption.sym_encrypt(output, shared_key)
+                #         socket.sendall(output.encode())
+                # else:
+                #     print(bcolors.FAIL+"Authentication failed!"+bcolors.ENDC)
+                #     break
             elif data['type'] == 'Chat':
                 # Same as before just now we have to decrypt the message
                 pass
@@ -411,7 +414,7 @@ def listen():
     while True:
         try:
             client_sock, addr = server_sock.accept()
-            thr = threading.Thread(target=handle_chat, args=(client_sock, addr))
+            thr = threading.Thread(target=side_thread, args=(client_sock, addr))
             thr.daemon = True
             thr.start()
         except KeyboardInterrupt:
