@@ -14,7 +14,7 @@ from cryptography.hazmat.primitives import hashes
 import json
 from Colors import bcolors
 
-sock = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
 sock.bind(('',1600))
 sock.listen(10)
@@ -66,8 +66,7 @@ def makedb():
 def get_pbkey(uname):
     conn = sqlite3.connect('users.db')
     cur = conn.cursor()
-    sql = "SELECT public_key from Users where username='%s'"%uname
-    cur.execute(sql)
+    cur.execute("SELECT public_key from Users where username='%s'"%(uname))
     pbkey = cur.fetchone()[0]
     conn.close()
     return Encryption.deserialize_public_key(pbkey)
@@ -133,6 +132,7 @@ def new_connection(c, a):
             payload = c.recv(MAX_SIZE).decode()
             # payload = json.loads(c.recv(1024).decode())
         except Exception as e:
+            sock.close()
             print("Error - %s"%e)
             exit(-1)
             
@@ -201,7 +201,41 @@ def new_connection(c, a):
                             response = {'cipher': "", 'signature': "", 'status' : 'FAIL'}
 
                     send(json.dumps(response), c)
-
+                
+                elif payload['type'] == 'show_online':
+                    username = payload['user']
+                    client_key = client_keys[username]
+                    nonce = int(payload['nonce'])
+                    online_users = list(authorized_users.keys())
+                    outp = {
+                        'command': 'show_online',
+                        'status': 'SUCC',
+                        'nonce': nonce+1,
+                        'online_users': online_users
+                    }
+                    pbkey = get_pbkey(username)
+                    signature = Encryption.signature(json.dumps(outp), private_key)
+                    cipher = Encryption.sym_encrypt(json.dumps(outp), client_key)
+                    response = {'cipher': cipher, 'signature': signature}
+                    send(json.dumps(response), c)
+                    print('Online users sent successfully!')
+                
+                elif payload['type'] == 'logout':
+                    username = payload['user']
+                    client_key = client_keys[username]
+                    nonce = int(payload['nonce'])
+                    outp = {
+                        'command': 'logout',
+                        'status': 'SUCC',
+                        'nonce': nonce+1
+                    }
+                    signature = Encryption.signature(json.dumps(outp), private_key)
+                    cipher = Encryption.sym_encrypt(json.dumps(outp), client_key)
+                    response = {'cipher': cipher, 'signature': signature}
+                    send(json.dumps(response), c)
+                    del connections[connections.index(c)]
+                    authorized_users = {k: v for k, v in authorized_users.items() if v != c}
+                    print('User logged out successfully!')
 
                 elif payload['type'] == 'handshake':
                     nonce = payload['nonce']

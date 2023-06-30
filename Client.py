@@ -39,7 +39,6 @@ chats = {}
 
 user_keys = {}
 
-
 username = None
 
 server_pkey = None
@@ -155,6 +154,50 @@ def login():
         return 0
 
 
+def show_online():
+    global server_pkey
+    nonce = random.randint(100000, 999999)
+    data_to_send = {
+        "type": "show_online",
+        "nonce": nonce,
+        "user": username
+    }
+    print(data_to_send)
+    send(Encryption.asymmetric_encrypt(json.dumps(data_to_send), fname=None, publickey=server_pkey))
+    response = json.loads(sock.recv(MAX_SIZE).decode())
+    plain = Encryption.sym_decrypt(response["cipher"], LTK)
+    plain = json.loads(plain)
+    print(plain)
+    signature = response["signature"]
+    if plain["status"]=="SUCC" and plain['nonce'] == nonce + 1:
+        clear_screen()
+        print(bcolors.OKGREEN + f"Online users : {', '.join(plain['online_users'])}" + bcolors.ENDC)
+        return 0
+    else:
+        print(bcolors.FAIL+"Could not get online users. Please try again."+bcolors.ENDC)
+        return -1
+    
+def logout():
+    global server_pkey, commands
+    nonce = random.randint(100000, 999999)
+    data_to_send = {
+        "type": "logout",
+        "nonce": nonce,
+        "user": username
+    }
+    send(Encryption.asymmetric_encrypt(json.dumps(data_to_send), fname=None, publickey=server_pkey))
+    response = json.loads(sock.recv(MAX_SIZE).decode())
+    plain = Encryption.sym_decrypt(response["cipher"], LTK)
+    plain = json.loads(plain)
+    signature = response["signature"]
+    if plain["status"]=="SUCC" and plain['nonce'] == nonce + 1:
+        clear_screen()
+        print(bcolors.OKGREEN + f"Successfuly logged out." + bcolors.ENDC)
+        commands = main_page.copy()
+        return 0
+    else:
+        print(bcolors.FAIL+"Could not logout. Please try again."+bcolors.ENDC)
+        return -1
     
 
 
@@ -236,7 +279,10 @@ def show_menu():
             register()
         elif command == ':login':
             login()
-
+        elif command == ':showonline':
+            show_online()
+        elif command == ':logout':
+            logout()
 
 def handle_chat(socket, address):
     global chats

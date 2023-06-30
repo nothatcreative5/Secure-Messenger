@@ -93,7 +93,7 @@ def signature(text, private):
     return signature.decode(FORMAT)
     
 
-def check_authenticity(text,signature,public_key):
+def check_authenticity(text, signature, public_key):
     try:
         public_key.verify(
         signature.encode(FORMAT),
