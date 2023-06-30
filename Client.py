@@ -92,7 +92,7 @@ def register():
               json.loads(plain)['nonce'] == "Nonce":
             clear_screen()
             print(bcolors.OKGREEN + f"Successfuly registerd as {uname}" + bcolors.ENDC)
-            user_keys[uname] = [publickey, privatekey,None]
+            user_keys[uname] = [publickey, privatekey, None]
             return 0
 
     except Exception as e:
@@ -162,15 +162,13 @@ def show_online():
         "nonce": nonce,
         "user": username
     }
-    print(data_to_send)
     send(Encryption.asymmetric_encrypt(json.dumps(data_to_send), fname=None, publickey=server_pkey))
     response = json.loads(sock.recv(MAX_SIZE).decode())
-    plain = Encryption.sym_decrypt(response["cipher"], LTK)
+    plain = Encryption.sym_decrypt(response["cipher"], user_keys[username][2])
     plain = json.loads(plain)
-    print(plain)
     signature = response["signature"]
     if plain["status"]=="SUCC" and plain['nonce'] == nonce + 1:
-        clear_screen()
+        # clear_screen()
         print(bcolors.OKGREEN + f"Online users : {', '.join(plain['online_users'])}" + bcolors.ENDC)
         return 0
     else:
@@ -187,7 +185,7 @@ def logout():
     }
     send(Encryption.asymmetric_encrypt(json.dumps(data_to_send), fname=None, publickey=server_pkey))
     response = json.loads(sock.recv(MAX_SIZE).decode())
-    plain = Encryption.sym_decrypt(response["cipher"], LTK)
+    plain = Encryption.sym_decrypt(response["cipher"], user_keys[username][2])
     plain = json.loads(plain)
     signature = response["signature"]
     if plain["status"]=="SUCC" and plain['nonce'] == nonce + 1:

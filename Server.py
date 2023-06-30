@@ -204,7 +204,7 @@ def new_connection(c, a):
                 
                 elif payload['type'] == 'show_online':
                     username = payload['user']
-                    client_key = client_keys[username]
+                    client_key = client_keys[c]
                     nonce = int(payload['nonce'])
                     online_users = list(authorized_users.keys())
                     outp = {
@@ -222,7 +222,7 @@ def new_connection(c, a):
                 
                 elif payload['type'] == 'logout':
                     username = payload['user']
-                    client_key = client_keys[username]
+                    client_key = client_keys[c]
                     nonce = int(payload['nonce'])
                     outp = {
                         'command': 'logout',
