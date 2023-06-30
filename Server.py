@@ -43,13 +43,14 @@ def makedb():
             public_key
             );
         CREATE TABLE IF NOT EXISTS Messages(
-            user1,
-            user2,
+            owner,
+            sender,
+            receiver,
             encrypted_msg,
             signature,
             time,
-            FOREIGN KEY(user1) REFERENCES Users(username),
-            FOREIGN KEY(user2) REFERENCES Users(username));
+            FOREIGN KEY(sender) REFERENCES Users(username),
+            FOREIGN KEY(receiver) REFERENCES Users(username));
         CREATE TABLE IF NOT EXISTS Groups(
             group_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
             owner,
@@ -316,7 +317,7 @@ def new_connection(c, a):
                     nonce = payload['nonce']
 
                     response = {
-                        "type": "send_message",
+                        "type": "message",
                         "cipher": cipher,
                         "from": from_,
                         "to": peer,
@@ -326,7 +327,21 @@ def new_connection(c, a):
                     cipher_s = Encryption.sym_encrypt(json.dumps(response), client_keys[authorized_users[peer]['side_sock']])
                     send_to_side_sock(cipher_s, peer)
 
+                elif payload['type'] == "remessage":
 
+                    peer = payload['to']
+                    from_ = payload['from']
+                    cipher = payload['cipher']
+
+                    response = {
+                        "type": "remessage",
+                        "cipher": cipher,
+                        "from": from_,
+                        "to": peer,
+                    }
+
+                    cipher_s = Encryption.sym_encrypt(json.dumps(response), client_keys[authorized_users[peer]['main_sock']])
+                    send_to_main_sock(cipher_s, peer)
 
             except Exception as e:
                 raise e

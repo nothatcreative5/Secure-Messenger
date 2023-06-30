@@ -36,6 +36,11 @@ def genkeys(size):
 
     return public_key, private_key
 
+def cipher_from_hash(pass_hash):
+    pass_hash = pass_hash.finalize()
+    key = pass_hash
+    iv = pass_hash[:16]
+    return Encryption.gen_sym_key(key, iv)
 
 def diffie_first_step():
     # Generate Diffie-Hellman parameters and public key.
@@ -54,8 +59,7 @@ def get_next_DH_key(parameters, peer_public_bkey, private_key):
     private_key = parameters.generate_private_key()
     public_key = private_key.public_key()
 
-    return cipher, public_key.public_bytes( encoding=serialization.Encoding.DER, format=serialization.PublicFormat.SubjectPublicKeyInfo).decode(FORMAT)
-    , private_key
+    return cipher, public_key.public_bytes( encoding=serialization.Encoding.DER, format=serialization.PublicFormat.SubjectPublicKeyInfo).decode(FORMAT), private_key
 
 
 def get_diffie_hellman_key(parameters, pbkey):
@@ -69,7 +73,7 @@ def get_diffie_hellman_key(parameters, pbkey):
 
     shared_key = private_key.exchange(pbkey)
 
-    cipher = gen_sym_key(shared_key[:32], shared_key[32:])
+    cipher = gen_sym_key(shared_key[:32], shared_key[32:48])
 
     return cipher, public_key.public_bytes(
     encoding=serialization.Encoding.DER,

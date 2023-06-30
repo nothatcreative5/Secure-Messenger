@@ -14,7 +14,6 @@ import codecs
 from Colors import bcolors
 import json
 
-
 from cryptography.hazmat.primitives import serialization
 
 
@@ -31,6 +30,7 @@ FORMAT = 'latin-1'
 sock = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
 server_sock = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
 
+# Chat variables
 sender_chats = {}
 receiver_chats = {}
 
@@ -41,8 +41,41 @@ username = None
 server_pkey = None
 LTK = None
 
+
 def send(resp):
     sock.sendall(resp.encode())
+
+def save_message_to_database(sender, receiver, message, signiture="", time=""):
+    global username, password
+
+    # encrypt message using hash of the password
+    digest = hashes.Hash(hashes.SHA256())
+    digest.update(password.encode())
+
+    key = Encryption.cipher_from_hash(digest)
+
+    enc_sender = Encryption.sym_encrypt(sender, key)
+    enc_receiver = Encryption.sym_encrypt(receiver, key)
+    enc_message = Encryption.sym_encrypt(message, key)
+    enc_signiture = Encryption.sym_encrypt(signiture, key)
+    enc_timestamp = Encryption.sym_encrypt(timestamp, key)
+
+    # add message to database
+    conn, curs = connect_to_database()
+    curs.execute("INSERT INTO messages VALUES (?, ?, ?, ?, ?)", (username, enc_sender, enc_receiver, enc_message, enc_signiture, enc_timestamp))
+    conn.commit()
+    conn.close()
+
+
+def connect_to_database():
+    global conn, curs
+    if(path.exists("users.db")):
+        conn = sqlite3.connect("users.db")
+        curs = conn.cursor()
+        return conn, curs
+    else:
+        print("Error: Database not found")
+
 
 def register():
     global username, commands, publickey, privatekey
@@ -185,6 +218,8 @@ def logout():
         print(bcolors.FAIL+"Could not logout. Please try again."+bcolors.ENDC)
         return -1
     
+    # close database connection
+    
 
 
 main_page = {":login" : "Login to an existing account", ":register" : "Create an account"}
@@ -197,8 +232,6 @@ commands = main_page.copy()
 def clear_screen():
     pass
     # os.system('cls' if os.name == 'nt' else 'clear')
-
-
 
 # Initial authentication of the server.
 def handshake():
@@ -253,9 +286,48 @@ def initial_client():
 
 
 def load_chat(peer):
+    global username
     clear_screen()
-    #TODO: read from database and show the chat
-    pass
+    
+    conn, curs = connect_to_database()
+    curs.execute("SELECT * FROM Messages where owner = %s", (username))
+
+    # encrypt message using hash of the password
+    digest = hashes.Hash(hashes.SHA256())
+    digest.update(password.encode())
+    key = Encryption.cipher_from_hash(digest)
+
+    chat_messages = []
+    items = curs.fetchall()
+    for item in items:
+        sender, receiver, message, signiture, timestamp = message
+        sender = Encryption.sym_decrypt(sender, key)
+        receiver = Encryption.sym_decrypt(receiver, key)
+        if sender == peer or receiver == peer:
+            message = Encryption.sym_decrypt(message, key)
+            signiture = Encryption.sym_decrypt(signiture, key)
+            timestamp = Encryption.sym_decrypt(timestamp, key)
+        
+            chat_messages.append({
+                "sender": sender,
+                "receiver": receiver,
+                "message": message,
+                "signiture": signiture,
+                "timestamp": timestamp
+            })
+
+    # sort based on timestamp
+    chat_messages.sort(key=lambda x: x["timestamp"])
+
+    for message in chat_messages:
+        # color sender based on the username
+        if message["sender"] == username:
+            sender_color = bcolors.OKGREEN
+        else:
+            sender_color = bcolors.OKBLUE
+        print(sender_color + f"{message['sender']}: {message['message']}" + bcolors.ENDC)
+
+    
 
 def send_message(peer):
     global username, server_pke
@@ -268,12 +340,14 @@ def send_message(peer):
             break
         else:
             nonce = random.randint(100000, 999999)
+
             data_to_peer = {
                 "type": "send_message",
                 "nonce": nonce,
                 "from": username,
                 "to": peer,
-                "message": msg
+                "message": msg,
+                "new_public_df_key": sender_chats[peer]["public_df_key"]
             }
             encrypted_data_to_peer = Encryption.sym_encrypt(json.dumps(data_to_peer), sender_chats[peer]["shared_key"])
 
@@ -287,107 +361,122 @@ def send_message(peer):
             encrypted_data_to_send = Encryption.sym_encrypt(json.dumps(data_to_send), LTK)
 
             send(encrypted_data_to_send)
-    
+
+            # get ack from server
+            response = json.loads(sock.recv(MAX_SIZE).decode())
+            response = Encryption.sym_decrypt(response["cipher"], LTK)
+            response = json.loads(response)
+            if response["type"] == "remessage" and response["to"] == username and response["from"] == peer and response["status"] == "SUCC" and response["nonce"] == nonce + 1:
+                save_message_to_database(username, peer, msg, signiture="", time="")
+                
+                peer_public_df_key = response["public_df_key"]
+                private_df_key = sender_chats[peer]["private_df_key"]
+                parameters = sender_chats[peer]["parameters"]
+                next_cipher, next_public_df_key, next_private_df_key = Encryption.diffie_second_step(parameters, peer_public_df_key, private_df_key)
+
+                sender_chats[peer]["shared_key"] = next_cipher
+                sender_chats[peer]["public_df_key"] = next_public_df_key
+                sender_chats[peer]["private_df_key"] = next_private_df_key
+
     return 0
-
-
-
-
 
 
 def initiate_chat():
     global server_pkey, username
     nonce = random.randint(100000, 999999)
     peer = input("Enter the username of the user you want to chat with : ")
-    data_to_send = {
-        "type": "initiate_chat",
-        "nonce": nonce,
-        "from": username,
-        "peer": peer 
-    }
-    send(Encryption.sym_encrypt(json.dumps(data_to_send), LTK))
-    response = json.loads(sock.recv(MAX_SIZE).decode())
-    plain = Encryption.sym_decrypt(response["cipher"], LTK)
-    plain = json.loads(plain)
-
-    peer_pbkey = plain["peer_pbkey"]
-
-    signature = response["signature"]
-    if plain["status"]=="SUCC" and plain['nonce'] == nonce + 1:
-        print('HABIBI')
-        # peer-public public diffey private diffey diffey ghabli
-        parameters, public_df_key, private_df_key = Encryption.diffie_first_step()
-
-        p = parameters.parameter_numbers().p
-        g = parameters.parameter_numbers().g
-        peer_pbkey = Encryption.deserialize_public_key(peer_pbkey)
-        sender_chats[peer] = {
-            "peer_pbkey": peer_pbkey,
-            "private_df_key": private_df_key,
-            "public_df_key": public_df_key,
-            "shared_key": None,
-            "parameters": parameters
-
-        }
-
-        public_df_key = public_df_key.public_bytes(encoding=serialization.Encoding.DER,format=serialization.PublicFormat.SubjectPublicKeyInfo).decode(FORMAT)
-
-        response = {
-            "type": "Exchange",
-            "parameters": [p, g],
-            "public_df_key": public_df_key,
-            "from": username,
-            "to": peer,
-            "nonce": nonce
-        }
-        
-        key = os.urandom(32)
-        iv = os.urandom(16)
-        shared_key_1 = Encryption.gen_sym_key(key, iv)
-        key_cipher = {'key': key.decode(FORMAT), 'iv': iv.decode(FORMAT)}
-        encrypted_key = Encryption.asymmetric_encrypt(json.dumps(key_cipher), fname=None, publickey=peer_pbkey)
-        sender_chats[peer]["shared_key"] = shared_key_1
-        data_to_send = {
-            "cipher": Encryption.sym_encrypt(json.dumps(response), shared_key_1),
-            "type": "Exchange",
-            "from": username,
-            "to": peer,
-            "key": encrypted_key
-        }
-
-
-        # signature = Encryption.signature(json.dumps(response), user_keys[username][1])
-        # print(signature)
-        
-
-        server_cipher = Encryption.sym_encrypt(json.dumps(data_to_send), LTK)
-
-        send(server_cipher)
-
-        response = json.loads(sock.recv(MAX_SIZE).decode())
-        response = Encryption.sym_decrypt(response, LTK)
-        if response["type"] == "ReExchange" and response["to"] == username and response["from"] == peer:
-            print(response["type"])
-            cipher = response["cipher"]
-            peer_public_df_key = Encryption.sym_decrypt(cipher, shared_key_1)
-
-            sender_chats[peer]["peer_public_df_key"] = peer_public_df_key
-        
-            next_cipher, next_public_df_key, next_private_df_key = Encryption.diffie_second_step(parameters, peer_public_df_key, private_df_key)
-
-            sender_chats[peer]["shared_key"] = next_cipher
-            sender_chats[peer]["public_df_key"] = next_public_df_key
-            sender_chats[peer]["private_df_key"] = next_private_df_key
-
-            send_message(peer)
-        else:
-            print("Error in exchanging keys")
-
-
-        print(bcolors.OKGREEN + f"Online users : {', '.join(plain['online_users'])}" + bcolors.ENDC)
+    if peer in sender_chats:
+        send_message(peer)
     else:
-        # print(bcolors.FAIL+"Could not get online users. Please try again."+bcolors.ENDC)
-        return -1
+        data_to_send = {
+            "type": "initiate_chat",
+            "nonce": nonce,
+            "from": username,
+            "peer": peer 
+        }
+        send(Encryption.sym_encrypt(json.dumps(data_to_send), LTK))
+
+        # get response from server
+        response = json.loads(sock.recv(MAX_SIZE).decode())
+        plain = Encryption.sym_decrypt(response["cipher"], LTK)
+        plain = json.loads(plain)
+
+        peer_pbkey = plain["peer_pbkey"]
+
+        # signature = response["signature"]
+        if plain["status"]=="SUCC" and plain['nonce'] == nonce + 1:
+            # peer-public public diffey private diffey diffey ghabli
+            parameters, public_df_key, private_df_key = Encryption.diffie_first_step()
+
+            p = parameters.parameter_numbers().p
+            g = parameters.parameter_numbers().g
+            peer_pbkey = Encryption.deserialize_public_key(peer_pbkey)
+            sender_chats[peer] = {
+                "peer_pbkey": peer_pbkey,
+                "private_df_key": private_df_key,
+                "public_df_key": public_df_key,
+                "shared_key": None,
+                "parameters": parameters
+            }
+
+            public_df_key = public_df_key.public_bytes(encoding=serialization.Encoding.DER,format=serialization.PublicFormat.SubjectPublicKeyInfo).decode(FORMAT)
+
+            response = {
+                "type": "Exchange",
+                "parameters": [p, g],
+                "public_df_key": public_df_key,
+                "from": username,
+                "to": peer,
+                "nonce": nonce
+            }
+            
+            key = os.urandom(32)
+            iv = os.urandom(16)
+            shared_key_1 = Encryption.gen_sym_key(key, iv)
+            key_cipher = {'key': key.decode(FORMAT), 'iv': iv.decode(FORMAT)}
+            encrypted_key = Encryption.asymmetric_encrypt(json.dumps(key_cipher), fname=None, publickey=peer_pbkey)
+            sender_chats[peer]["shared_key"] = shared_key_1
+            data_to_send = {
+                "cipher": Encryption.sym_encrypt(json.dumps(response), shared_key_1),
+                "type": "Exchange",
+                "from": username,
+                "to": peer,
+                "key": encrypted_key
+            }
+
+
+            # signature = Encryption.signature(json.dumps(response), user_keys[username][1])
+            # print(signature)
+            
+
+            server_cipher = Encryption.sym_encrypt(json.dumps(data_to_send), LTK)
+
+            send(server_cipher)
+
+            response = json.loads(sock.recv(MAX_SIZE).decode())
+            response = Encryption.sym_decrypt(response, LTK)
+            if response["type"] == "ReExchange" and response["to"] == username and response["from"] == peer:
+                print(response["type"])
+                cipher = response["cipher"]
+                peer_public_df_key = Encryption.sym_decrypt(cipher, shared_key_1)
+
+                sender_chats[peer]["peer_public_df_key"] = peer_public_df_key
+            
+                next_cipher, next_public_df_key, next_private_df_key = Encryption.diffie_second_step(parameters, peer_public_df_key, private_df_key)
+
+                sender_chats[peer]["shared_key"] = next_cipher
+                sender_chats[peer]["public_df_key"] = next_public_df_key
+                sender_chats[peer]["private_df_key"] = next_private_df_key
+
+                send_message(peer)
+            else:
+                print("Error in exchanging keys")
+
+
+            print(bcolors.OKGREEN + f"Online users : {', '.join(plain['online_users'])}" + bcolors.ENDC)
+        else:
+            # print(bcolors.FAIL+"Could not get online users. Please try again."+bcolors.ENDC)
+            return -1
 
 
 # Menu is a dictionary of commmands and their descriptions
@@ -424,6 +513,7 @@ def side_thread(socket, address):
             data = socket.recv(MAX_SIZE).decode()
             plain = Encryption.sym_decrypt(data, LTK)
             plain = json.loads(plain)
+            print("log: type ", plain['type'])
             if plain['type'] == 'Exchange':
                 cipher = plain['cipher']
                 peer_pbkey = plain['peer_pbkey']
@@ -439,8 +529,10 @@ def side_thread(socket, address):
                 peer = cipher_plain['from']
                 nonce = cipher_plain['nonce']
                 to = cipher_plain['to']
-                new_shared_key, df_public_key = Encryption.get_diffie_hellman_key(parameters, peer_public_df_key)
                 assert to == username
+
+                new_shared_key, df_public_key = Encryption.get_diffie_hellman_key(parameters, peer_public_df_key)
+                
 
                 receiver_chats[peer] = {
                     "peer_pbkey": peer_pbkey,
@@ -450,30 +542,88 @@ def side_thread(socket, address):
                     "parameters": parameters
                 }
 
-                response = {
+                data_to_peer = {
                     "type": "ReExchange",
                     "status": "SUCC",
                     "nonce": nonce + 1,
+                    "from": username,
+                    "to": peer,
                     "public_df_key": df_public_key
                 }
 
-                encrypted_response = Encryption.sym_encrypt(json.dumps(response), shared_key)
-                data_to_send = {
+                encrypted_response = Encryption.sym_encrypt(json.dumps(data_to_peer), shared_key)
+                data_to_server = {
                     "cipher": encrypted_response,
                     "type": "ReExchange",
                     "from": username,
                     "to": peer
                 }
 
-                server_cipher = Encryption.sym_encrypt(json.dumps(data_to_send), LTK)
+                server_cipher = Encryption.sym_encrypt(json.dumps(data_to_server), LTK)
 
                 send(server_cipher)
 
                 print(bcolors.OKGREEN+json.dumps(plain)+bcolors.ENDC)
 
-            elif data['type'] == 'Chat':
-                # Same as before just now we have to decrypt the message
-                pass
+            elif data['type'] == 'message':
+                
+                cipher = plain['cipher']
+                from_ = plain['from']
+                to = plain['to']
+                server_nonce = plain['nonce']
+                peer = from_
+                assert to == username
+                
+                shared_key = receiver_chats[peer]['shared_key']
+                cipher_plain = Encryption.sym_decrypt(cipher, shared_key)
+                cipher_plain = json.loads(cipher_plain)
+
+                
+                peer_msg_type = cipher_plain['type']
+                peer = cipher_plain['from']
+                peer_to = cipher_plain['to']
+                peer_msg = cipher_plain['message']
+                peer_nonce = cipher_plain['nonce']
+                peer_public_df_key = cipher_plain['new_public_df_key']
+
+                assert peer_msg_type == 'send_message'
+                assert peer_to == username
+                
+                if peer not in sender_chats.keys():
+                    print(bcolors.FAIL+"You have not initiated a chat with this user. Please initiate a chat first."+bcolors.ENDC)
+                    continue
+
+                save_message_to_database(sender, receiver, message, signiture, time)
+
+                parameters = receiver_chats[peer]['parameters']
+                new_shared_key, df_public_key = Encryption.get_diffie_hellman_key(parameters, peer_public_df_key)
+
+                receiver_chats[peer]["peer_public_df_key"] = peer_public_df_key
+                receiver_chats[peer]["shared_key"] = new_shared_key
+                receiver_chats[peer]["public_df_key"] = df_public_key
+                
+                data_to_peer = {
+                    "type": "remessage",
+                    "status": "SUCC",
+                    "nonce": peer_nonce,
+                    "from": username,
+                    "to": peer,
+                    "public_df_key": df_public_key
+                }
+
+                encrypted_response = Encryption.sym_encrypt(json.dumps(data_to_peer), shared_key)
+                data_to_server = {
+                    "cipher": encrypted_response,
+                    "type": "remessage",
+                    "from": username,
+                    "to": peer
+                }
+
+                server_cipher = Encryption.sym_encrypt(json.dumps(data_to_server), LTK)
+
+                send(server_cipher)
+
+
         except Exception as e:
             raise e
 
