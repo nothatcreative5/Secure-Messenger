@@ -284,9 +284,13 @@ def initiate_chat():
     peer_pbkey = plain["peer_pbkey"]
 
     signature = response["signature"]
-    if plain["status"]=="SUCC" and plain['nonce'] == nonce + 1 and Encryption.check_authenticity(plain, signature,server_pkey) == 0:
+    if plain["status"]=="SUCC" and plain['nonce'] == nonce + 1:
+        print('HABIBI')
         # peer-public public diffey private diffey diffey ghabli
-        parameters, private_df_key, public_df_key = Encryption.diffie_first_step()
+        parameters, public_df_key, private_df_key = Encryption.diffie_first_step()
+
+        p = parameters.parameter_numbers().p
+        g = parameters.parameter_numbers().g
 
         chats[peer] = {
             "peer_pbkey": peer_pbkey,
@@ -294,19 +298,25 @@ def initiate_chat():
             "public_df_key": public_df_key,
             "shared_key": None,
             "parameters": parameters
+
         }
+
+        public_df_key = public_df_key.public_bytes(encoding=serialization.Encoding.DER,format=serialization.PublicFormat.SubjectPublicKeyInfo).decode(FORMAT)
 
         response = {
             "type": "Exchange",
-            "parameters": parameters,
-            "public_df_key": public_df_key,
-            "from": username,
-            "to": peer,
+            # "parameters": [p, g],
+            # "public_df_key": public_df_key,
+            # "from": username,
+            # "to": peer,
             "nonce": nonce
         }
 
+        cipher = Encryption.asymmetric_encrypt(json.dumps(response), fname=None, publickey=user_keys[username][0])
+
+        # signature = Encryption.signature(json.dumps(response), user_keys[username][1])
+        cipher = Encryption.asymmetric_encrypt(json.dumps(response), fname=None, publickey=Encryption.deserialize_public_key(peer_pbkey))
         signature = Encryption.signature(json.dumps(response), user_keys[username][1])
-        cipher = Encryption.asymmetric_encrypt(json.dumps(signature), fname=None, publickey=peer_pbkey)
 
         # cipher = Encryption.asymmetric_encrypt(json.dumps(response), fname=None, publickey=peer_pbkey)
         # signature = Encryption.signature(json.dumps(cipher), user_keys[username][1])

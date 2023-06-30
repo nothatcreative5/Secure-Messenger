@@ -100,8 +100,6 @@ def register(uname, passwd, pub_key):
             digest.update(passwd.encode())
             h_password = digest.finalize().hex()
 
-            print(h_password)
-
             conn.execute("INSERT INTO Users(username,h_password,public_key) values('%s','%s','%s')"%(uname,h_password,pub_key))
             conn.commit()
             conn.close()
@@ -149,6 +147,7 @@ def new_connection(c, a):
         else:
             try:
                 payload = json.loads(Encryption.asymmetric_dycrypt(payload, private_key))
+                print(payload['type'])
                 if payload['type'] == 'register':
                     plain = payload['plain']
                     nonce = payload['nonce']
@@ -256,6 +255,8 @@ def new_connection(c, a):
                     nonce = payload['nonce']
                     from_ = payload['from']
 
+                    print('salam')
+
                     peer_pbkey = Encryption.serialize_public_key(get_pbkey(peer))
 
                     response = {
@@ -266,10 +267,11 @@ def new_connection(c, a):
                     }
                     client_key = client_keys[c]
                     signature = Encryption.signature(json.dumps(response), private_key)
-                    cipher = Encryption.sym_encrypt(json.dumps(response), publickey=client_key)
+                    cipher = Encryption.sym_encrypt(json.dumps(response), client_key)
                     response = {'cipher': cipher, 'signature': signature}
                     send(json.dumps(response), c)
                 elif payload['type'] == "Exchange":
+                    print('dodol')
                     peer = payload['to']
                     from_ = payload['from']
                     cipher = payload['cipher']
@@ -278,9 +280,9 @@ def new_connection(c, a):
                         "type": "Exchange",
                         "cipher": cipher
                     }
-                    Encryption.sym_encrypt(json.dumps(response), client_keys[authorized_users[peer]['main_sock']])
+                    cipher_s = Encryption.sym_encrypt(json.dumps(response), client_keys[authorized_users[peer]['main_sock']])
 
-                    send_to_side_sock(cipher, peer)
+                    send_to_side_sock(cipher_s, peer)
 
 
 

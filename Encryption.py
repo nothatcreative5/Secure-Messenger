@@ -66,6 +66,9 @@ def get_diffie_hellman_key(parameters, pbkey):
 
 
 
+
+
+
     
 def asymmetric_encrypt(text,fname,publickey):
 
