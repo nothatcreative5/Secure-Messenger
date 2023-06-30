@@ -15,6 +15,7 @@ from Colors import bcolors
 import json
 
 from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives import hashes
 
 
 # Global variables
@@ -268,7 +269,7 @@ def initial_client():
     print(bcolors.OKBLUE+"Trying to connect and handshake with the server..."+bcolors.ENDC)
     
     try:
-        sock.connect(('127.0.0.1',19000))
+        sock.connect(('127.0.0.1',16000))
         # hard code babyyyy
         server_sock.bind(('127.0.0.1',int(sys.argv[1])))
         server_sock.listen(10)
@@ -300,7 +301,7 @@ def load_chat(peer):
     chat_messages = []
     items = curs.fetchall()
     for item in items:
-        sender, receiver, message, signiture, timestamp = message
+        sender, receiver, message, signiture, timestamp = item
         sender = Encryption.sym_decrypt(sender, key)
         receiver = Encryption.sym_decrypt(receiver, key)
         if sender == peer or receiver == peer:
@@ -372,7 +373,7 @@ def send_message(peer):
                 peer_public_df_key = response["public_df_key"]
                 private_df_key = sender_chats[peer]["private_df_key"]
                 parameters = sender_chats[peer]["parameters"]
-                next_cipher, next_public_df_key, next_private_df_key = Encryption.diffie_second_step(parameters, peer_public_df_key, private_df_key)
+                next_cipher, next_public_df_key, next_private_df_key = Encryption.get_next_DH_key(parameters, peer_public_df_key, private_df_key)
 
                 sender_chats[peer]["shared_key"] = next_cipher
                 sender_chats[peer]["public_df_key"] = next_public_df_key
@@ -462,7 +463,7 @@ def initiate_chat():
 
                 sender_chats[peer]["peer_public_df_key"] = peer_public_df_key
             
-                next_cipher, next_public_df_key, next_private_df_key = Encryption.diffie_second_step(parameters, peer_public_df_key, private_df_key)
+                next_cipher, next_public_df_key, next_private_df_key = Encryption.get_next_DH_key(parameters, peer_public_df_key, private_df_key)
 
                 sender_chats[peer]["shared_key"] = next_cipher
                 sender_chats[peer]["public_df_key"] = next_public_df_key

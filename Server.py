@@ -17,7 +17,7 @@ from time import sleep
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
-sock.bind(('',19000))
+sock.bind(('',16000))
 sock.listen(10)
 
 pub_key = None
@@ -290,7 +290,6 @@ def new_connection(c, a):
                         "key": temp_key,
                     }
                     cipher_s = Encryption.sym_encrypt(json.dumps(response), client_keys[authorized_users[peer]['main_sock']])
-                    print(len(cipher_s))
                     send_to_side_sock(cipher_s, peer)
 
                 elif payload['type'] == "ReExchange":
@@ -307,6 +306,8 @@ def new_connection(c, a):
                     }
 
                     cipher_s = Encryption.sym_encrypt(json.dumps(response), client_keys[authorized_users[peer]['main_sock']])
+                    print(response)
+                    print(f"Sent to {peer}")
                     send_to_main_sock(cipher_s, peer)
                 
                 elif payload['type'] == "send_message":
