@@ -13,10 +13,11 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives import hashes
 import json
 from Colors import bcolors
+from time import sleep
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
-sock.bind(('',1600))
+sock.bind(('',19000))
 sock.listen(10)
 
 pub_key = None
@@ -75,7 +76,9 @@ def send(resp,c):
     c.sendall(resp.encode())
 
 def send_to_side_sock(resp, user):
+    print(authorized_users[user]["side_sock"])
     authorized_users[user]["side_sock"].sendall(resp.encode())
+    print(f"Sent to side {user}!")
 
 def register(uname, passwd, pub_key):
     # sys.exit(-1)
@@ -127,6 +130,20 @@ def login(uname, passwd):
 
 def new_connection(c, a):
     global authorized_users, client_keys
+    payload = c.recv(MAX_SIZE).decode()
+    payload = json.loads(Encryption.asymmetric_dycrypt(payload, private_key))
+    if payload['type'] == 'handshake':
+        nonce = payload['nonce']
+        outp = '{"command": "handshake", "status": "SUCC", "nonce": "%s"}'%nonce
+        signature = Encryption.signature(outp, private_key)
+        response = {'cipher': outp, 'signature': signature}
+        [key, iv] = payload['LTK']
+        key = key.encode(FORMAT)
+        iv = iv.encode(FORMAT) 
+        LTK = Encryption.gen_sym_key(key, iv)
+        client_keys[c] = LTK
+        send(json.dumps(response), c)
+        print("Finished Handhake")
     while True:
         try:
             payload = c.recv(MAX_SIZE).decode()
@@ -146,26 +163,27 @@ def new_connection(c, a):
 
         else:
             try:
-                payload = json.loads(Encryption.asymmetric_dycrypt(payload, private_key))
+                payload = json.loads(Encryption.sym_decrypt(payload, client_keys[c]))
                 print(payload['type'])
                 if payload['type'] == 'register':
                     plain = payload['plain']
                     nonce = payload['nonce']
                     pbkey = register(plain['username'], plain['password'], plain['pbkey'])
 
+
                     outp = {
                         'command': 'register',
-                        'nonce': nonce
+                        'nonce': nonce,
+                        'status': 'SUCC' if pbkey is not None else 'FAIL'
                     }
                     # pbkey = Encryption.deserialize_public_key(plain["pbkey"])
 
                     if pbkey is None: 
                         print('Failed to register user')
                         return -1
-                    
-                    signature = Encryption.signature(json.dumps(outp), private_key)
-                    cipher = Encryption.asymmetric_encrypt(json.dumps(outp), fname=None, publickey=pbkey)
-                    response = {'cipher': cipher, 'signature': signature, 'status' : 'SUCC'}
+                    cipher = Encryption.sym_encrypt(json.dumps(outp), client_keys[c])
+                    # signature = Encryption.signature(json.dumps(outp), private_key)
+                    response = {'cipher': cipher, 'status' : 'SUCC'}
                     send(json.dumps(response), c)
                     print('User registered successfully!')
 
@@ -178,11 +196,6 @@ def new_connection(c, a):
                     if uname in authorized_users:
                         response = {'cipher': "", 'signature': "", 'status' : 'FAIL'}
                     else:
-                        [key, iv] = plain['LTK']
-                        key = key.encode(FORMAT)
-                        iv = iv.encode(FORMAT) 
-
-                        LTK = Encryption.gen_sym_key(key, iv)
                         
                         result = login(plain['username'], plain['password'])
 
@@ -192,13 +205,13 @@ def new_connection(c, a):
                         }
 
                         if result == 1:
-                            client_keys[c] = LTK
                             main_sock = c
                             side_port = payload['side_port']
                             side_sock = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
                             side_sock.connect(('127.0.0.1', side_port))
                             authorized_users[uname] = {'main_sock': main_sock, 'side_sock': side_sock}
                             signature = Encryption.signature(json.dumps(outp), private_key)
+                            LTK = client_keys[c]
                             cipher = Encryption.sym_encrypt(json.dumps(outp), LTK)
                             response = {'cipher': cipher, 'signature': signature, 'status' : 'SUCC'}
                         else:
@@ -237,17 +250,8 @@ def new_connection(c, a):
                     cipher = Encryption.sym_encrypt(json.dumps(outp), client_key)
                     response = {'cipher': cipher, 'signature': signature}
                     send(json.dumps(response), c)
-                    del connections[connections.index(c)]
                     authorized_users = {k: v for k, v in authorized_users.items() if v["main_sock"] != c}
                     print('User logged out successfully!')
-
-                elif payload['type'] == 'handshake':
-                    nonce = payload['nonce']
-                    outp = '{"command": "handshake", "status": "SUCC", "nonce": "%s"}'%nonce
-                    signature = Encryption.signature(outp, private_key)
-                    response = {'cipher': outp, 'signature': signature}
-                    send(json.dumps(response), c)
-                    print("Finished Handhake")
 
                 elif payload['type'] == "initiate_chat":
                     peer = payload['peer']
@@ -269,19 +273,23 @@ def new_connection(c, a):
                     cipher = Encryption.sym_encrypt(json.dumps(response), client_key)
                     response = {'cipher': cipher, 'signature': signature}
                     send(json.dumps(response), c)
-                elif payload['type'] == "Exchange":
+                elif payload['type'] == "Exchange":   
                     print('dodol')
                     peer = payload['to']
                     from_ = payload['from']
                     cipher = payload['cipher']
-
+                    temp_key = payload['key']
+                    
+                    
                     response = {
                         "type": "Exchange",
-                        "cipher": cipher
+                        "cipher": cipher,
+                        "key": temp_key,
                     }
                     cipher_s = Encryption.sym_encrypt(json.dumps(response), client_keys[authorized_users[peer]['main_sock']])
-
+                    print(len(cipher_s))
                     send_to_side_sock(cipher_s, peer)
+                    
 
 
 
@@ -311,7 +319,7 @@ if __name__ == "__main__":
         )
         f.close()
     else:
-        pub_key, private_key =  Encryption.genkeys(4096)
+        pub_key, private_key =  Encryption.genkeys(512 * 8)
         pem = pub_key.public_bytes(
             encoding=serialization.Encoding.PEM,
             format=serialization.PublicFormat.PKCS1)

@@ -43,6 +43,7 @@ username = None
 
 server_pkey = None
 
+LTK = None
 
 def send(resp):
     sock.sendall(resp.encode())
@@ -59,7 +60,7 @@ def register():
         else:
             print(bcolors.FAIL+"Passwords do not match, try again."+bcolors.ENDC)
 
-    publickey, privatekey = Encryption.genkeys(512 * 2)
+    publickey, privatekey = Encryption.genkeys(512 * 8)
 
     try:
         data_to_send = {
@@ -72,7 +73,7 @@ def register():
             "nonce": "Nonce"
         }
 
-        send(Encryption.asymmetric_encrypt(json.dumps(data_to_send), fname=None, publickey=server_pkey))
+        send(Encryption.sym_encrypt(json.dumps(data_to_send), LTK))
         '''
         response = {
         cipher: "cipher",
@@ -80,16 +81,12 @@ def register():
         }
         '''
         response = json.loads(sock.recv(MAX_SIZE).decode())
-        plain = Encryption.asymmetric_dycrypt(response["cipher"], privatekey=privatekey)
-
-        signature = response["signature"]
-
+        plain = Encryption.sym_decrypt(response["cipher"], LTK)
 
         if response["status"] == "FAIL":
             print(bcolors.FAIL+"Could not register. Please try again."+bcolors.ENDC)
             return -1
-        elif Encryption.check_authenticity(plain, signature=signature, public_key=server_pkey) == 0 and \
-              json.loads(plain)['nonce'] == "Nonce":
+        elif json.loads(plain)['nonce'] == "Nonce":
             clear_screen()
             print(bcolors.OKGREEN + f"Successfuly registerd as {uname}" + bcolors.ENDC)
             user_keys[uname] = [publickey, privatekey, None]
@@ -108,22 +105,18 @@ def login():
     passwd = getpass.getpass(bcolors.OKBLUE+"Enter Password : "+bcolors.ENDC)
 
     try:
-        key = os.urandom(32)
-        iv = os.urandom(16)
-        LTK = Encryption.gen_sym_key(key, iv)
 
         data_to_send = {
             "type": "login",
             "plain": {
             "username": uname,
             "password": passwd,
-            "LTK": [key.decode(FORMAT), iv.decode(FORMAT)]
             },
             "nonce": "Nonce",
             "side_port": int(sys.argv[1])
         }
 
-        send(Encryption.asymmetric_encrypt(json.dumps(data_to_send), fname=None, publickey=server_pkey))
+        send(Encryption.sym_encrypt(json.dumps(data_to_send), LTK))
         '''
         response = {
         cipher: "cipher",
@@ -163,9 +156,9 @@ def show_online():
         "nonce": nonce,
         "user": username
     }
-    send(Encryption.asymmetric_encrypt(json.dumps(data_to_send), fname=None, publickey=server_pkey))
+    send(Encryption.sym_encrypt(json.dumps(data_to_send), LTK))
     response = json.loads(sock.recv(MAX_SIZE).decode())
-    plain = Encryption.sym_decrypt(response["cipher"], user_keys[username][2])
+    plain = Encryption.sym_decrypt(response["cipher"], LTK)
     plain = json.loads(plain)
     signature = response["signature"]
     if plain["status"]=="SUCC" and plain['nonce'] == nonce + 1:
@@ -184,9 +177,9 @@ def logout():
         "nonce": nonce,
         "user": username
     }
-    send(Encryption.asymmetric_encrypt(json.dumps(data_to_send), fname=None, publickey=server_pkey))
+    send(Encryption.sym_encrypt(json.dumps(data_to_send), LTK))
     response = json.loads(sock.recv(MAX_SIZE).decode())
-    plain = Encryption.sym_decrypt(response["cipher"], user_keys[username][2])
+    plain = Encryption.sym_decrypt(response["cipher"], LTK)
     plain = json.loads(plain)
     signature = response["signature"]
     if plain["status"]=="SUCC" and plain['nonce'] == nonce + 1:
@@ -216,14 +209,17 @@ def clear_screen():
 # Initial authentication of the server.
 def handshake():
 
-    global server_pkey
-
-    data_to_send = {
-        "type": "handshake",
-        "nonce" : "nonce",
-    }
+    global server_pkey, LTK
 
     try: 
+        key = os.urandom(32)
+        iv = os.urandom(16)
+        LTK = Encryption.gen_sym_key(key, iv)
+        data_to_send = {
+            "type": "handshake",
+            "nonce" : "nonce",
+            "LTK": [key.decode(FORMAT), iv.decode(FORMAT)]
+        }
         send(Encryption.asymmetric_encrypt(json.dumps(data_to_send), fname=None, publickey=server_pkey))
         response = json.loads(sock.recv(MAX_SIZE).decode())
         plain = json.loads(response['cipher'])
@@ -245,7 +241,7 @@ def initial_client():
     print(bcolors.OKBLUE+"Trying to connect and handshake with the server..."+bcolors.ENDC)
     
     try:
-        sock.connect(('127.0.0.1',1600))
+        sock.connect(('127.0.0.1',19000))
         # hard code babyyyy
         server_sock.bind(('127.0.0.1',int(sys.argv[1])))
         server_sock.listen(10)
@@ -279,9 +275,9 @@ def initiate_chat():
         "from": username,
         "peer": peer 
     }
-    send(Encryption.asymmetric_encrypt(json.dumps(data_to_send), fname=None, publickey=server_pkey))
+    send(Encryption.sym_encrypt(json.dumps(data_to_send), LTK))
     response = json.loads(sock.recv(MAX_SIZE).decode())
-    plain = Encryption.sym_decrypt(response["cipher"], user_keys[username][2])
+    plain = Encryption.sym_decrypt(response["cipher"], LTK)
     plain = json.loads(plain)
 
     peer_pbkey = plain["peer_pbkey"]
@@ -294,7 +290,7 @@ def initiate_chat():
 
         p = parameters.parameter_numbers().p
         g = parameters.parameter_numbers().g
-
+        peer_pbkey = Encryption.deserialize_public_key(peer_pbkey)
         chats[peer] = {
             "peer_pbkey": peer_pbkey,
             "private_df_key": private_df_key,
@@ -308,36 +304,42 @@ def initiate_chat():
 
         response = {
             "type": "Exchange",
-            # "parameters": [p, g],
+            "parameters": [p, g],
             "public_df_key": public_df_key,
             "from": username,
             "to": peer,
             "nonce": nonce
-        }        
-
-        # signature = Encryption.signature(json.dumps(response), user_keys[username][1])
-        # print(signature)
-        cipher = Encryption.asymmetric_encrypt(json.dumps(response), fname=None, publickey=Encryption.deserialize_public_key(peer_pbkey))
-        print(cipher)
-        print('meimon')
-
-        # cipher = Encryption.asymmetric_encrypt(json.dumps(response), fname=None, publickey=peer_pbkey)
-        # signature = Encryption.signature(json.dumps(cipher), user_keys[username][1])
-
+        }
+        
+        key = os.urandom(32)
+        iv = os.urandom(16)
+        temp_key = Encryption.gen_sym_key(key, iv)
+        key_cipher = {'key': key.decode(FORMAT), 'iv': iv.decode(FORMAT)}
+        encrypted_key = Encryption.asymmetric_encrypt(json.dumps(key_cipher), fname=None, publickey=peer_pbkey)
+        chats[peer]["shared_key"] = temp_key
+        print('HABIBI2')
         data_to_send = {
-            "cipher": cipher,
+            "cipher": Encryption.sym_encrypt(json.dumps(response), temp_key),
             "type": "Exchange",
             "from": username,
             "to": peer,
+            "key": encrypted_key
         }
+        
+        print('HABIBI3')
 
-        server_cipher = Encryption.asymmetric_encrypt(json.dumps(data_to_send), fname=None, publickey=server_pkey)
+        # signature = Encryption.signature(json.dumps(response), user_keys[username][1])
+        # print(signature)
+        
+
+        server_cipher = Encryption.sym_encrypt(json.dumps(data_to_send), LTK)
+        print('HABIBI4')
 
         send(server_cipher)
 
         response = json.loads(sock.recv(MAX_SIZE).decode())
         
-        # plain = Encryption.sym_decrypt(response["cipher"], user_keys[username][2])
+        
         
 
 
@@ -381,43 +383,17 @@ def side_thread(socket, address):
 
     while True:
         try:
-            data = json.loads(socket.recv(MAX_SIZE).decode())
-            if not data:
-                break
-            print(bcolors.OKGREEN+data.decode()+bcolors.ENDC)
+            data = socket.recv(MAX_SIZE).decode()
+            plain = Encryption.sym_decrypt(data, LTK)
+            plain = json.loads(plain)
+            if plain['type'] == 'Exchange':
+                print(bcolors.OKGREEN+json.dumps(plain)+bcolors.ENDC)
 
-            if data['type'] == 'Exchange':
-                plain = Encryption.sym_decrypt(data['cipher'], user_keys[username][2])
-                print(plain)
-
-                # signature = data['signature']
-                # if Encryption.check_authenticity(plain, signature, user_keys[username][1]) == 0:
-                #     parameters = plain['parameters']
-                #     peer = parameters['peer']
-                #     from_ = parameters['from']
-                #     pbkey = parameters['pbkey']
-
-                #     if peer not in chats:
-                #         shared_key, new_pbkey = Encryption.get_diffie_hellman_key(parameters ,pbkey)
-                #         # Messages and current key
-                #         chats[peer] = [[], shared_key] 
-                #         output = {
-                #             "type": "Exchange",
-                #             'pbkey' : new_pbkey,
-                #             'from' : peer,
-                #             'peer' : from_,
-                #         }
-                #         output = json.dumps(output)
-                #         output = Encryption.sym_encrypt(output, shared_key)
-                #         socket.sendall(output.encode())
-                # else:
-                #     print(bcolors.FAIL+"Authentication failed!"+bcolors.ENDC)
-                #     break
             elif data['type'] == 'Chat':
                 # Same as before just now we have to decrypt the message
                 pass
         except Exception as e:
-            break
+            raise e
 
 
 def listen():
