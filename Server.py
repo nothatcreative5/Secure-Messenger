@@ -10,6 +10,7 @@ import Encryption
 import Payload
 import sys
 from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives import hashes
 import json
 from Colors import bcolors
 
@@ -37,8 +38,9 @@ def makedb():
         sql = '''
         CREATE TABLE IF NOT EXISTS Users(
             username NOT NULL PRIMARY KEY,
-            password,
-            public_key);
+            h_password,
+            public_key
+            );
         CREATE TABLE IF NOT EXISTS Messages(
             user1,
             user2,
@@ -57,7 +59,6 @@ def makedb():
             PRIMARY KEY (group_id, user_id),
             FOREIGN KEY(user_id) REFERENCES Users(username),
             FOREIGN KEY(group_id) REFERENCES Groups(group_id));
-        
         '''
         cur.executescript(sql)
         conn.close()
@@ -92,7 +93,14 @@ def register(uname, passwd, pub_key):
             # salt = int.from_bytes(os.urandom(16), byteorder="big")
             # salt_pass = f'{passwd}{salt}'.encode()
             # h_password = hashlib.sha256(salt_pass).hexdigest()
-            conn.execute("INSERT INTO Users(username,password,public_key) values('%s','%s','%s')"%(uname,passwd,pub_key))
+
+            digest = hashes.Hash(hashes.SHA256())
+            digest.update(passwd.encode())
+            h_password = digest.finalize().hex()
+
+            print(h_password)
+
+            conn.execute("INSERT INTO Users(username,h_password,public_key) values('%s','%s','%s')"%(uname,h_password,pub_key))
             conn.commit()
             conn.close()
 
@@ -103,7 +111,12 @@ def register(uname, passwd, pub_key):
 
 def login(uname, passwd):
     conn = sqlite3.connect('users.db')
-    cursor = conn.execute("SELECT username from users where username='%s' and password='%s'"%(uname,passwd))
+
+    digest = hashes.Hash(hashes.SHA256())
+    digest.update(passwd.encode())
+    h_password = digest.finalize().hex()
+
+    cursor = conn.execute("SELECT username from users where username='%s' and h_password='%s'"%(uname,h_password))
     rowcount = len(cursor.fetchall())
     conn.close()
     if rowcount > 0:
@@ -113,7 +126,6 @@ def login(uname, passwd):
 
 
 def new_connection(c, a):
-    #Accept data from the client
     global authorized_users, client_keys
     while True:
         try:
@@ -128,6 +140,7 @@ def new_connection(c, a):
         if(not(payload)):
             print("Connection closed by client.\n")
             del connections[connections.index(c)]
+            del client_keys[c]
             authorized_users = {k: v for k, v in authorized_users.items() if v != c}
             break
 
@@ -141,49 +154,53 @@ def new_connection(c, a):
 
                     outp = {
                         'command': 'register',
-                        'status': 'SUCC',
                         'nonce': nonce
                     }
                     # pbkey = Encryption.deserialize_public_key(plain["pbkey"])
 
                     if pbkey is None: 
+                        response  
                         print('Failed to register user')
                         return -1
                     
                     signature = Encryption.signature(json.dumps(outp), private_key)
                     cipher = Encryption.asymmetric_encrypt(json.dumps(outp), fname=None, publickey=pbkey)
-                    response = {'cipher': cipher, 'signature': signature}
+                    response = {'cipher': cipher, 'signature': signature, 'status' : 'SUCC'}
                     send(json.dumps(response), c)
                     print('User registered successfully!')
 
                 elif payload['type'] == 'login':
-                    plain = payload['plain']
-                    [key, nonce] = plain['LTK']
-                    key = key.encode(FORMAT)
-                    nonce = nonce.encode(FORMAT) 
 
-                    LTK = Encryption.gen_sym_key(key, nonce)
-                    
+                    plain = payload['plain']
                     nonce = payload['nonce']
                     uname = plain['username']
 
-                    result = login(plain['username'], plain['password'])
+                    if uname in authorized_users:
+                        response = {'cipher': "", 'signature': "", 'status' : 'FAIL'}
+                    else:
+                        [key, iv] = plain['LTK']
+                        key = key.encode(FORMAT)
+                        iv = iv.encode(FORMAT) 
 
-                    outp = {
-                        'command': 'login',
-                        'status': 'SUCC',
-                        'nonce': nonce
-                    }
+                        LTK = Encryption.gen_sym_key(key, iv)
+                        
+                        result = login(plain['username'], plain['password'])
 
-                    if result == 1:
-                        client_keys[uname] = LTK
-                        authorized_users[uname] = c
-                    
-                    signature = Encryption.signature(json.dumps(outp), private_key)
-                    cipher = Encryption.sym_encrypt(json.dumps(outp), LTK)
-                    response = {'cipher': cipher, 'signature': signature}
+                        outp = {
+                            'command': 'login',
+                            'nonce': nonce
+                        }
+
+                        if result == 1:
+                            client_keys[c] = LTK
+                            authorized_users[uname] = c
+                            signature = Encryption.signature(json.dumps(outp), private_key)
+                            cipher = Encryption.sym_encrypt(json.dumps(outp), LTK)
+                            response = {'cipher': cipher, 'signature': signature, 'status' : 'SUCC'}
+                        else:
+                            response = {'cipher': "", 'signature': "", 'status' : 'FAIL'}
+
                     send(json.dumps(response), c)
-                    print('User logged in successfully!')
                 
                 elif payload['type'] == 'show_online':
                     username = payload['user']

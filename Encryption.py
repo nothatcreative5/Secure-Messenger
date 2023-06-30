@@ -19,6 +19,10 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding
 
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import dh
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
  
 def genkeys(size):
     # Generate public and private key pair.
@@ -32,21 +36,26 @@ def genkeys(size):
     return public_key, private_key
 
 
-# def symmetric_encrypt(text, key):
-#     cipher = AES.new(key, AES.MODE_EAX)
-#     ciphertext, tag = cipher.encrypt_and_digest(text)
-#     return ciphertext, tag, cipher.nonce
 
-# def symmetric_decrypt(ciphertext, tag, nonce, key):
-#     cipher = AES.new(key, AES.MODE_EAX, nonce)
-#     plaintext = cipher.decrypt(ciphertext)
-#     try:
-#         cipher.verify(tag)
-#         return plaintext
-#     except ValueError:
-#         print("Key incorrect or message corrupted")
-#         return None
- 
+def get_diffie_hellman_key(parameters, pbkey):
+    p, g = parameters
+    pn = dh.DHParameterNumbers(p, g)
+    parameters = pn.parameters()
+    pbkey = serialization.load_der_public_key(pbkey.encode(FORMAT))
+
+    private_key = parameters.generate_private_key()
+    public_key = private_key.public_key()
+
+    shared_key = private_key.exchange(pbkey)
+
+    cipher = gen_sym_key(shared_key[:32], shared_key[32:])
+
+    return cipher, public_key.public_bytes(
+    encoding=serialization.Encoding.DER,
+    format=serialization.PublicFormat.SubjectPublicKeyInfo).decode(FORMAT)
+
+
+
     
 def asymmetric_encrypt(text,fname,publickey):
 
@@ -71,10 +80,6 @@ def asymmetric_dycrypt(cipher,privatekey):
     return plaintext.decode(FORMAT)
 
 
-def hash_string(text):
-    digest = SHA256.new()
-    digest.update(text)
-    return digest
 
 def signature(text, private):
     signature = private.sign(
@@ -90,7 +95,6 @@ def signature(text, private):
 
 def check_authenticity(text, signature, public_key):
     try:
-        # text = text.encode(FORMAT)
         public_key.verify(
         signature.encode(FORMAT),
         text.encode(FORMAT),
@@ -100,7 +104,7 @@ def check_authenticity(text, signature, public_key):
         ),
         hashes.SHA256())
         return 0
-    except Exception as e:
+    except Exception:
         return -1
     
 
@@ -117,13 +121,10 @@ def deserialize_public_key(public_key):
     
 
 
-def gen_sym_key(key, nonce):
+def gen_sym_key(key, iv):
     # https://cryptography.io/en/latest/hazmat/primitives/symmetric-encryption/
 
-    # key = os.urandom(32)
-    # nonce = os.urandom(16)
-
-    algorithm = algorithms.ChaCha20(key, nonce)
+    algorithm = algorithms.ChaCha20(key, iv)
     cipher = Cipher(algorithm, mode=None)
 
     return cipher
