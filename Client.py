@@ -227,6 +227,7 @@ def handshake():
         response = json.loads(sock.recv(MAX_SIZE).decode())
         plain = json.loads(response['cipher'])
         signature = response["signature"]
+        print(response, plain, Encryption.check_authenticity(response['cipher'], signature,server_pkey))
         if Encryption.check_authenticity(response['cipher'], signature,server_pkey) == 0 and \
         plain['status'] == 'SUCC' and plain['nonce'] == 'nonce':
             return 1
@@ -234,6 +235,7 @@ def handshake():
             return 0
 
     except Exception as e:
+        print(e)
         return 0
 
 
@@ -305,8 +307,8 @@ def initiate_chat():
 
         response = {
             "type": "Exchange",
-            "parameters": [p, g],
-            "public_df_key": public_df_key,
+            # "parameters": [p, g],
+            # "public_df_key": public_df_key,
             "from": username,
             "to": peer,
             "nonce": nonce
@@ -316,6 +318,7 @@ def initiate_chat():
         print(signature)
         cipher = Encryption.asymmetric_encrypt(json.dumps(signature), fname=None, publickey=Encryption.deserialize_public_key(peer_pbkey))
         print(cipher)
+        print('meimon')
 
         # cipher = Encryption.asymmetric_encrypt(json.dumps(response), fname=None, publickey=peer_pbkey)
         # signature = Encryption.signature(json.dumps(cipher), user_keys[username][1])

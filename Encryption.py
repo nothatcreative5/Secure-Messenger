@@ -2,6 +2,7 @@ import ast
 import hashlib
 from cryptography.hazmat.primitives import serialization
 import codecs
+import json
 
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -70,10 +71,11 @@ def get_diffie_hellman_key(parameters, pbkey):
 
 
     
-def asymmetric_encrypt(text, fname, publickey, max_size=1024):
+def asymmetric_encrypt(text, fname, publickey, max_size=128):
     chunks = [text[i:i+max_size] for i in range(0, len(text), max_size)]
     ciphertext = []
     for chunk in chunks:
+        # chunk = json.dumps(chunk)
         chunk_ciphertext = publickey.encrypt(
             chunk.encode(FORMAT),
             padding.OAEP(
@@ -82,13 +84,14 @@ def asymmetric_encrypt(text, fname, publickey, max_size=1024):
                 label=None
             ))
         ciphertext.append(chunk_ciphertext.decode(FORMAT))
-    return ciphertext
+    return json.dumps(ciphertext)
     
-def asymmetric_dycrypt(cipher, privatekey, max_size=1024):
+def asymmetric_dycrypt(cipher, privatekey, max_size=128):
     plaintext = ''
+    cipher = json.loads(cipher)
     for chunk in cipher:
         plaintext_chunk = privatekey.decrypt(
-            chunk,
+            chunk.encode(FORMAT),
             padding.OAEP(
                 mgf=padding.MGF1(algorithm=hashes.SHA256()),
                 algorithm=hashes.SHA256(),
