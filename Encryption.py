@@ -46,6 +46,16 @@ def diffie_first_step():
 
     return parameters, public_key, private_key
 
+def get_next_DH_key(parameters, peer_public_bkey, private_key):
+    shared_key = private_key.exchange(peer_public_bkey)
+
+    cipher = gen_sym_key(shared_key[:32], shared_key[32:])
+
+    private_key = parameters.generate_private_key()
+    public_key = private_key.public_key()
+
+    return cipher, public_key.public_bytes( encoding=serialization.Encoding.DER, format=serialization.PublicFormat.SubjectPublicKeyInfo).decode(FORMAT)
+    , private_key
 
 
 def get_diffie_hellman_key(parameters, pbkey):

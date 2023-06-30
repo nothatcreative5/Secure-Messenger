@@ -75,10 +75,11 @@ def get_pbkey(uname):
 def send(resp,c):
     c.sendall(resp.encode())
 
+def send_to_main_sock(resp, user):
+    authorized_users[user]["main_sock"].sendall(resp.encode())
+
 def send_to_side_sock(resp, user):
-    print(authorized_users[user]["side_sock"])
     authorized_users[user]["side_sock"].sendall(resp.encode())
-    print(f"Sent to side {user}!")
 
 def register(uname, passwd, pub_key):
     # sys.exit(-1)
@@ -290,9 +291,40 @@ def new_connection(c, a):
                     cipher_s = Encryption.sym_encrypt(json.dumps(response), client_keys[authorized_users[peer]['main_sock']])
                     print(len(cipher_s))
                     send_to_side_sock(cipher_s, peer)
+
+                elif payload['type'] == "ReExchange":
+
+                    peer = payload['to']
+                    from_ = payload['from']
+                    cipher = payload['cipher']
+
+                    response = {
+                        "type": "ReExchange",
+                        "cipher": cipher,
+                        "from": from_,
+                        "to": peer,
+                    }
+
+                    cipher_s = Encryption.sym_encrypt(json.dumps(response), client_keys[authorized_users[peer]['main_sock']])
+                    send_to_main_sock(cipher_s, peer)
+                
+                elif payload['type'] == "send_message":
                     
+                    peer = payload['to']
+                    from_ = payload['from']
+                    cipher = payload['cipher']
+                    nonce = payload['nonce']
 
+                    response = {
+                        "type": "send_message",
+                        "cipher": cipher,
+                        "from": from_,
+                        "to": peer,
+                        "nonce": nonce,
+                    }
 
+                    cipher_s = Encryption.sym_encrypt(json.dumps(response), client_keys[authorized_users[peer]['side_sock']])
+                    send_to_side_sock(cipher_s, peer)
 
 
 
