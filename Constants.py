@@ -1,0 +1,2 @@
+FORMAT = 'latin-1'
+MAX_SIZE = 65536
