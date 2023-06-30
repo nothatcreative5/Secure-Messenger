@@ -284,6 +284,7 @@ def new_connection(c, a):
                     response = {
                         "type": "Exchange",
                         "cipher": cipher,
+                        "peer_pbkey": Encryption.serialize_public_key(get_pbkey(peer)),
                         "key": temp_key,
                     }
                     cipher_s = Encryption.sym_encrypt(json.dumps(response), client_keys[authorized_users[peer]['main_sock']])

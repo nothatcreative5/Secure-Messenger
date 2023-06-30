@@ -31,25 +31,21 @@ FORMAT = 'latin-1'
 sock = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
 server_sock = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
 
-chats = {}
+sender_chats = {}
+receiver_chats = {}
 
 # Encryption keys
-# publickey = None
-# privatekey = None
-
-user_keys = {}
-
+publickey = None
+privatekey = None
 username = None
-
 server_pkey = None
-
 LTK = None
 
 def send(resp):
     sock.sendall(resp.encode())
 
 def register():
-    global username, commands
+    global username, commands, publickey, privatekey
     while True:
         uname = input(bcolors.OKBLUE+"Choose a username : "+bcolors.ENDC)
         passwd = getpass.getpass(bcolors.OKBLUE+"Enter Password : "+bcolors.ENDC)
@@ -89,7 +85,6 @@ def register():
         elif json.loads(plain)['nonce'] == "Nonce":
             clear_screen()
             print(bcolors.OKGREEN + f"Successfuly registerd as {uname}" + bcolors.ENDC)
-            user_keys[uname] = [publickey, privatekey, None]
             return 0
 
     except Exception as e:
@@ -99,7 +94,7 @@ def register():
     
 
 def login():
-    global commands, user_keys, username
+    global commands, username
 
     uname = input(bcolors.OKBLUE+"Choose a username : "+bcolors.ENDC)
     passwd = getpass.getpass(bcolors.OKBLUE+"Enter Password : "+bcolors.ENDC)
@@ -136,7 +131,6 @@ def login():
             
             clear_screen()
             print(bcolors.OKGREEN + f"Successfuly logged in as {uname}" + bcolors.ENDC)
-            user_keys[uname][2] = LTK
             username = uname
             commands = account_page.copy()
             return 0
@@ -291,7 +285,7 @@ def initiate_chat():
         p = parameters.parameter_numbers().p
         g = parameters.parameter_numbers().g
         peer_pbkey = Encryption.deserialize_public_key(peer_pbkey)
-        chats[peer] = {
+        sender_chats[peer] = {
             "peer_pbkey": peer_pbkey,
             "private_df_key": private_df_key,
             "public_df_key": public_df_key,
@@ -316,7 +310,7 @@ def initiate_chat():
         temp_key = Encryption.gen_sym_key(key, iv)
         key_cipher = {'key': key.decode(FORMAT), 'iv': iv.decode(FORMAT)}
         encrypted_key = Encryption.asymmetric_encrypt(json.dumps(key_cipher), fname=None, publickey=peer_pbkey)
-        chats[peer]["shared_key"] = temp_key
+        sender_chats[peer]["shared_key"] = temp_key
         print('HABIBI2')
         data_to_send = {
             "cipher": Encryption.sym_encrypt(json.dumps(response), temp_key),
@@ -379,7 +373,7 @@ def show_menu():
             initiate_chat()
 
 def side_thread(socket, address):
-    global chats
+    global sender_chats
 
     while True:
         try:
@@ -387,6 +381,36 @@ def side_thread(socket, address):
             plain = Encryption.sym_decrypt(data, LTK)
             plain = json.loads(plain)
             if plain['type'] == 'Exchange':
+                cipher = plain['cipher']
+                peer_pbkey = plain['peer_pbkey']
+                key_cipher = plain['key']
+                key_iv = json.loads(Encryption.asymmetric_dycrypt(key_cipher, privatekey))
+                
+                # Get the shared key
+                shared_key = Encryption.gen_sym_key(key_iv['key'].encode(FORMAT), key_iv['iv'].encode(FORMAT))
+                cipher_plain = Encryption.sym_decrypt(cipher, shared_key)
+                cipher_plain = json.loads(cipher_plain)
+                parameters = cipher_plain['parameters']
+                peer_public_df_key = cipher_plain['public_df_key']
+                peer = cipher_plain['from']
+                nonce = cipher_plain['nonce']
+                to = cipher_plain['to']
+                shared_key, df_public_key = Encryption.get_diffie_hellman_key(parameters, peer_public_df_key)
+                receiver_chats[peer] = {
+                    "peer_pbkey": peer_pbkey,
+                    "public_df_key": df_public_key,
+                    "peer_public_df_key": peer_public_df_key,
+                    "shared_key": shared_key,
+                    "parameters": parameters
+                }
+                response = {
+                    "type": "Exchange",
+                    "status": "SUCC",
+                    "nonce": nonce + 1
+                }
+
+                assert to == username
+
                 print(bcolors.OKGREEN+json.dumps(plain)+bcolors.ENDC)
 
             elif data['type'] == 'Chat':
