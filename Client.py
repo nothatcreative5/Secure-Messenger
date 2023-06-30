@@ -258,6 +258,84 @@ def initial_client():
         sys.exit(1)
 
 
+def sendMessage(peer):
+    global username, server_pke
+
+
+
+
+
+def initiate_chat():
+    global server_pkey
+    nonce = random.randint(100000, 999999)
+    peer = input("Enter the username of the user you want to chat with : ")
+    data_to_send = {
+        "type": "initiate_chat",
+        "nonce": nonce,
+        "from": username,
+        "peer": peer 
+    }
+    send(Encryption.asymmetric_encrypt(json.dumps(data_to_send), fname=None, publickey=server_pkey))
+    response = json.loads(sock.recv(MAX_SIZE).decode())
+    plain = Encryption.sym_decrypt(response["cipher"], user_keys[username][2])
+    plain = json.loads(plain)
+
+    peer_pbkey = plain["peer_pbkey"]
+
+    signature = response["signature"]
+    if plain["status"]=="SUCC" and plain['nonce'] == nonce + 1 and Encryption.check_authenticity(plain, signature,server_pkey) == 0:
+        # peer-public public diffey private diffey diffey ghabli
+        parameters, private_df_key, public_df_key = Encryption.diffie_first_step()
+
+        chats[peer] = {
+            "peer_pbkey": peer_pbkey,
+            "private_df_key": private_df_key,
+            "public_df_key": public_df_key,
+            "shared_key": None,
+            "parameters": parameters
+        }
+
+        response = {
+            "type": "Exchange",
+            "parameters": parameters,
+            "public_df_key": public_df_key,
+            "from": username,
+            "to": peer,
+            "nonce": nonce
+        }
+
+        signature = Encryption.signature(json.dumps(response), user_keys[username][1])
+        cipher = Encryption.asymmetric_encrypt(json.dumps(signature), fname=None, publickey=peer_pbkey)
+
+        # cipher = Encryption.asymmetric_encrypt(json.dumps(response), fname=None, publickey=peer_pbkey)
+        # signature = Encryption.signature(json.dumps(cipher), user_keys[username][1])
+
+        data_to_send = {
+            "cipher": cipher,
+            "type": "Exchange",
+            "from": username,
+            "to": peer,
+        }
+
+        server_cipher = Encryption.asymmetric_encrypt(json.dumps(data_to_send), fname=None, publickey=server_pkey)
+
+        send(server_cipher)
+
+        response = json.loads(sock.recv(MAX_SIZE).decode())
+        
+        # plain = Encryption.sym_decrypt(response["cipher"], user_keys[username][2])
+        
+
+
+        sendMessage()
+
+
+        print(bcolors.OKGREEN + f"Online users : {', '.join(plain['online_users'])}" + bcolors.ENDC)
+    else:
+        # print(bcolors.FAIL+"Could not get online users. Please try again."+bcolors.ENDC)
+        return -1
+
+
 # Menu is a dictionary of commmands and their descriptions
 def show_menu():
     global commands
@@ -281,6 +359,8 @@ def show_menu():
             show_online()
         elif command == ':logout':
             logout()
+        elif command == ':chat':
+            initiate_chat()
 
 def handle_chat(socket, address):
     global chats

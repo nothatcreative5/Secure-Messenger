@@ -36,6 +36,16 @@ def genkeys(size):
     return public_key, private_key
 
 
+def diffie_first_step():
+    # Generate Diffie-Hellman parameters and public key.
+
+    parameters = dh.generate_parameters(generator=2, key_size=512, backend=None)
+    private_key = parameters.generate_private_key()
+    public_key = private_key.public_key()
+
+    return parameters, public_key, private_key
+
+
 
 def get_diffie_hellman_key(parameters, pbkey):
     p, g = parameters

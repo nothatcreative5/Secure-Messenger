@@ -245,6 +245,26 @@ def new_connection(c, a):
                     send(json.dumps(response), c)
                     print("Finished Handhake")
 
+                elif payload['type'] == "initiate_chat":
+                    peer = payload['peer']
+                    nonce = payload['nonce']
+                    from_ = payload['from']
+
+                    peer_pbkey = get_pbkey(peer)
+
+                    response = {
+                        'command': 'initiate_chat',
+                        'status': 'SUCC',
+                        'nonce': nonce+1,
+                        'peer_pbkey': peer_pbkey,
+                    }
+                    client_key = client_keys[c]
+                    signature = Encryption.signature(json.dumps(response), private_key)
+                    cipher = Encryption.asymmetric_encrypt(json.dumps(response), fname=None, publickey=client_key)
+                    response = {'cipher': cipher, 'signature': signature}
+                    send(json.dumps(response), c)
+
+
 
             except Exception as e:
                 raise e
