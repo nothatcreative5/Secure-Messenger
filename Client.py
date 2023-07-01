@@ -40,7 +40,6 @@ in_chat_with = None
 # Encryption keys
 publickey = None
 privatekey = None
-username = None
 server_pkey = None
 LTK = None
 
@@ -69,6 +68,55 @@ def save_message_to_database(sender, receiver, message, timestamp, signiture="")
     conn.commit()
     conn.close()
 
+def raw_initialization():
+    global sender_chats, receiver_chats, in_chat_with, username, password, publickey, privatekey, server_pkey, LTK
+    # Chat variables
+    sender_chats = {}
+    receiver_chats = {}
+    in_chat_with = None
+
+    # Encryption keys
+    publickey = None
+    privatekey = None
+    username = None
+    password = None
+
+    print("Variables are raw initialized!")
+
+def save_keys(uname, publickey, privatekey):
+    try:
+        with open(f"keys\{uname}_public.pem", "wb") as f:
+            f.write(publickey.public_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo
+            ))
+        with open(f"keys\{uname}_private.pem", "wb") as f:
+            f.write(privatekey.private_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PrivateFormat.PKCS8,
+                encryption_algorithm=serialization.NoEncryption()
+            ))
+        print("Keys are saved successfully!")
+    except e:
+        print(e)
+
+def load_keys(uname):
+    try:
+        with open(f"keys\{uname}_public.pem", "rb") as f:
+            publickey = serialization.load_pem_public_key(
+                f.read()
+            )
+        with open(f"keys\{uname}_private.pem", "rb") as f:
+            privatekey = serialization.load_pem_private_key(
+                f.read(),
+                password=None
+            )
+        print("Keys are loaded successfully!")
+        return publickey, privatekey
+    except e:
+        print("Error in loading keys!")
+        print(e)
+    
 
 def connect_to_database():
     global conn, curs
@@ -121,18 +169,7 @@ def register():
         elif json.loads(plain)['nonce'] == "Nonce":
             clear_screen()
             print(bcolors.OKGREEN + f"Successfuly registerd as {uname}" + bcolors.ENDC)
-            # save public and private keys to files with username in the filename
-            with open(f"keys\{uname}_public.pem", "wb") as f:
-                f.write(publickey.public_bytes(
-                    encoding=serialization.Encoding.PEM,
-                    format=serialization.PublicFormat.SubjectPublicKeyInfo
-                ))
-            with open(f"keys\{uname}_private.pem", "wb") as f:
-                f.write(privatekey.private_bytes(
-                    encoding=serialization.Encoding.PEM,
-                    format=serialization.PrivateFormat.PKCS8,
-                    encryption_algorithm=serialization.NoEncryption()
-                ))
+            save_keys(uname, publickey, privatekey)
             return 0
 
     except Exception as e:
@@ -142,7 +179,7 @@ def register():
     
 
 def login():
-    global commands, username
+    global commands, username, password, privatekey, publickey
 
     uname = input(bcolors.OKBLUE+"Choose a username : "+bcolors.ENDC)
     passwd = getpass.getpass(bcolors.OKBLUE+"Enter Password : "+bcolors.ENDC)
@@ -179,13 +216,17 @@ def login():
             
             clear_screen()
             print(bcolors.OKGREEN + f"Successfuly logged in as {uname}" + bcolors.ENDC)
+            raw_initialization()
             username = uname
+            password = passwd
             commands = account_page.copy()
+            publickey, privatekey = load_keys(uname)
             return 0
         else:
             print(bcolors.FAIL+"Could not login. Please try again."+bcolors.ENDC)
             return -1
     except Exception as e:
+        print(e)
         print(bcolors.FAIL+"Couldn't communicate with the server :("+bcolors.ENDC)
         return 0
 
@@ -228,6 +269,7 @@ def logout():
         clear_screen()
         print(bcolors.OKGREEN + f"Successfuly logged out." + bcolors.ENDC)
         commands = main_page.copy()
+        raw_initialization()
         return 0
     else:
         print(bcolors.FAIL+"Could not logout. Please try again."+bcolors.ENDC)
@@ -300,7 +342,7 @@ def initial_client():
 
 
 def load_chat(peer):
-    global username
+    global username, password
     clear_screen()
     
     conn, curs = connect_to_database()
@@ -380,24 +422,29 @@ def send_message(peer):
 
             # get ack from server
             response = sock.recv(MAX_SIZE).decode()
-            response = json.loads(Encryption.sym_decrypt(response, LTK))
-            response = Encryption.sym_decrypt(response["cipher"], sender_chats[peer]['shared_key'])
-            response = json.loads(response)
+            server_response = json.loads(Encryption.sym_decrypt(response, LTK))
             
-            # Check nonce and peer
-            if response["nonce"] == nonce or response["from"] == peer:
-                timestamp = int(time.time())
-                save_message_to_database(username, peer, msg, timestamp, signiture='')
-                                
-                peer_public_df_key = response["public_df_key"]
-                peer_public_df_key = serialization.load_der_public_key(peer_public_df_key.encode(FORMAT))
-                private_df_key = sender_chats[peer]["private_df_key"]
-                parameters = sender_chats[peer]["parameters"]
-                next_cipher, next_public_df_key, next_private_df_key = Encryption.get_next_DH_key(parameters, peer_public_df_key, private_df_key)
+            if server_response["status"] == "SUCC":
+                peer_response = Encryption.sym_decrypt(server_response["cipher"], sender_chats[peer]['shared_key'])
+                peer_response = json.loads(peer_response)
+                if peer_response["nonce"] == nonce or peer_response["from"] == peer:
+                    timestamp = int(time.time())
+                    save_message_to_database(username, peer, msg, timestamp, signiture='')
+                                    
+                    peer_public_df_key = peer_response["public_df_key"]
+                    peer_public_df_key = serialization.load_der_public_key(peer_public_df_key.encode(FORMAT))
+                    private_df_key = sender_chats[peer]["private_df_key"]
+                    parameters = sender_chats[peer]["parameters"]
+                    next_cipher, next_public_df_key, next_private_df_key = Encryption.get_next_DH_key(parameters, peer_public_df_key, private_df_key)
 
-                sender_chats[peer]["shared_key"] = next_cipher
-                sender_chats[peer]["public_df_key"] = next_public_df_key
-                sender_chats[peer]["private_df_key"] = next_private_df_key
+                    sender_chats[peer]["shared_key"] = next_cipher
+                    sender_chats[peer]["public_df_key"] = next_public_df_key
+                    sender_chats[peer]["private_df_key"] = next_private_df_key
+            elif server_response["status"] == "NOT_SUCH_ONLINE_USER":
+                print(bcolors.FAIL + f"{peer} is not online!" + bcolors.ENDC)
+                sender_chats.pop(peer)
+                time.sleep(1)
+                break
 
     return 0
 
@@ -422,13 +469,12 @@ def initiate_chat():
 
         # get response from server
         response = json.loads(sock.recv(MAX_SIZE).decode())
-        plain = Encryption.sym_decrypt(response["cipher"], LTK)
-        plain = json.loads(plain)
-
-        peer_pbkey = plain["peer_pbkey"]
+        server_response = Encryption.sym_decrypt(response["cipher"], LTK)
+        server_response = json.loads(server_response)
 
         # signature = response["signature"]
-        if plain["status"]=="SUCC" and plain['nonce'] == nonce + 1:
+        if server_response["status"]=="SUCC" and server_response['nonce'] == nonce + 1:
+            peer_pbkey = server_response["peer_pbkey"]
             # peer-public public diffey private diffey diffey ghabli
             parameters, public_df_key, private_df_key = Encryption.diffie_first_step()
 
@@ -468,7 +514,6 @@ def initiate_chat():
                 "key": encrypted_key
             }
 
-
             # signature = Encryption.signature(json.dumps(response), user_keys[username][1])
             # print(signature)
             
@@ -501,8 +546,9 @@ def initiate_chat():
                 send_message(peer)
             else:
                 print("Error in exchanging keys")
+        elif server_response["status"]=="NOT_SUCH_ONLINE_USER" and server_response['nonce'] == nonce + 1:
+            print(f"{peer} is not available right now!")
         else:
-            # print(bcolors.FAIL+"Could not get online users. Please try again."+bcolors.ENDC)
             return -1
 
 
@@ -590,7 +636,7 @@ def side_thread(socket, address):
                 receiver_chats[peer]["public_df_key"] = df_public_key
 
                 server_cipher = Encryption.sym_encrypt(json.dumps(data_to_server), LTK)
-
+                print("Sending ReExchange to server")
                 send(server_cipher)
 
 
@@ -659,6 +705,7 @@ def side_thread(socket, address):
 
 
         except Exception as e:
+            raise e
             continue
 
 
