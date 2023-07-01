@@ -40,7 +40,7 @@ def cipher_from_hash(pass_hash):
     pass_hash = pass_hash.finalize()
     key = pass_hash
     iv = pass_hash[:16]
-    return Encryption.gen_sym_key(key, iv)
+    return gen_sym_key(key, iv)
 
 def diffie_first_step():
     # Generate Diffie-Hellman parameters and public key.
@@ -54,7 +54,7 @@ def diffie_first_step():
 def get_next_DH_key(parameters, peer_public_bkey, private_key):
     shared_key = private_key.exchange(peer_public_bkey)
 
-    cipher = gen_sym_key(shared_key[:32], shared_key[32:])
+    cipher = gen_sym_key(shared_key[:32], shared_key[32:48])
 
     private_key = parameters.generate_private_key()
     public_key = private_key.public_key()

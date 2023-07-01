@@ -325,7 +325,7 @@ def new_connection(c, a):
                         "nonce": nonce,
                     }
 
-                    cipher_s = Encryption.sym_encrypt(json.dumps(response), client_keys[authorized_users[peer]['side_sock']])
+                    cipher_s = Encryption.sym_encrypt(json.dumps(response), client_keys[authorized_users[peer]['main_sock']])
                     send_to_side_sock(cipher_s, peer)
 
                 elif payload['type'] == "remessage":
@@ -341,7 +341,10 @@ def new_connection(c, a):
                         "to": peer,
                     }
 
+                    print('server hastam',response)
+
                     cipher_s = Encryption.sym_encrypt(json.dumps(response), client_keys[authorized_users[peer]['main_sock']])
+                    print('kir khori?', cipher_s)
                     send_to_main_sock(cipher_s, peer)
 
             except Exception as e:
