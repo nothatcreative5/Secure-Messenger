@@ -13,6 +13,7 @@ import Encryption
 import codecs
 import sqlite3
 from Colors import bcolors
+import pickle
 import json
 
 from cryptography.hazmat.primitives import serialization
@@ -344,6 +345,9 @@ def initial_client():
 def load_chat(peer):
     global username, password
     clear_screen()
+    if peer in receiver_chats and peer in sender_chats:
+        print(receiver_chats[peer]['emojis'])
+        print(sender_chats[peer]['emojis'])
     
     conn, curs = connect_to_database()
     curs.execute("SELECT * FROM Messages where owner = '%s'"%(username))
@@ -540,6 +544,7 @@ def initiate_chat():
                 next_cipher, next_public_df_key, next_private_df_key = Encryption.get_next_DH_key(parameters, peer_public_df_key, private_df_key)
 
                 sender_chats[peer]["shared_key"] = next_cipher
+                sender_chats[peer]['emojis'] = Encryption.emoji_converter(pickle.dumps(next_cipher))
                 sender_chats[peer]["public_df_key"] = next_public_df_key
                 sender_chats[peer]["private_df_key"] = next_private_df_key
 
@@ -634,6 +639,9 @@ def side_thread(socket, address):
 
                 receiver_chats[peer]["shared_key"] = new_shared_key
                 receiver_chats[peer]["public_df_key"] = df_public_key
+                receiver_chats[peer]['emojis'] = Encryption.emoji_converter(pickle.dumps(new_shared_key))
+
+                print(pickle.dumps(new_shared_key))
 
                 server_cipher = Encryption.sym_encrypt(json.dumps(data_to_server), LTK)
                 print("Sending ReExchange to server")

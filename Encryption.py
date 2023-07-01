@@ -24,6 +24,17 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import dh
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
+
+
+def emoji_converter(message):
+    Emojis = ["😀","😞","😂","😨","😀","🧜","👽","🦄"]
+    emojis = ""
+    for i in range(170, 175):
+        emojis += Emojis[message[i] % 8]
+
+    return emojis
+
+
  
 def genkeys(size):
     # Generate public and private key pair.
