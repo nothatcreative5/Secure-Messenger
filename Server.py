@@ -17,7 +17,7 @@ from time import sleep
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
-sock.bind(('',16000))
+sock.bind(('',17000))
 sock.listen(10)
 
 pub_key = None
