@@ -585,11 +585,7 @@ def change_keys():
         }
         data_to_send = Encryption.sym_encrypt(json.dumps(data_to_send), LTK)
         send(data_to_send)
-        print("Kir")
-        response = json.loads(sock.recv(MAX_SIZE).decode())
-        print("Koon")
-        response = Encryption.sym_decrypt(response, LTK)
-        print("Kos")
+        response = json.loads(Encryption.sym_decrypt(sock.recv(MAX_SIZE).decode(), LTK))
         check, response = Encryption.check_sign(response, server_pkey)
         if check != 0:
             print("Server message is not signed correctly!")
@@ -602,7 +598,7 @@ def change_keys():
         
         status = response["status"]
         if status == "SUCC":
-            save_keys(new_public_key, new_private_key)
+            save_keys(username, new_public_key, new_private_key)
             print("Keys are changed successfully!")
         elif status == "FAILED":
             print("Change key is denied by server!")

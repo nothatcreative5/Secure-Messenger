@@ -175,7 +175,7 @@ def new_connection(c, a):
             payload = c.recv(MAX_SIZE).decode()
             # payload = json.loads(c.recv(1024).decode())
         except Exception as e:
-            sock.close()
+            c.close()
             print("Error - %s"%e)
             exit(-1)
             
@@ -281,6 +281,7 @@ def new_connection(c, a):
                         'status': 'SUCC',
                         'nonce': nonce+1
                     }
+
                     signature = Encryption.signature(json.dumps(outp), private_key)
                     cipher = Encryption.sym_encrypt(json.dumps(outp), client_key)
                     response = {'cipher': cipher, 'signature': signature}
