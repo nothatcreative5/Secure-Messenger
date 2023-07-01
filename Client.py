@@ -35,6 +35,7 @@ server_sock = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
 # Chat variables
 sender_chats = {}
 receiver_chats = {}
+in_chat_with = None
 
 # Encryption keys
 publickey = None
@@ -120,6 +121,18 @@ def register():
         elif json.loads(plain)['nonce'] == "Nonce":
             clear_screen()
             print(bcolors.OKGREEN + f"Successfuly registerd as {uname}" + bcolors.ENDC)
+            # save public and private keys to files with username in the filename
+            with open(f"keys\{uname}_public.pem", "wb") as f:
+                f.write(publickey.public_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PublicFormat.SubjectPublicKeyInfo
+                ))
+            with open(f"keys\{uname}_private.pem", "wb") as f:
+                f.write(privatekey.private_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PrivateFormat.PKCS8,
+                    encryption_algorithm=serialization.NoEncryption()
+                ))
             return 0
 
     except Exception as e:
@@ -232,7 +245,7 @@ account_page = {":chat" : "Chat with an online user",":showonline" : "Show onlin
 commands = main_page.copy()
 
 def clear_screen():
-    # pass
+    print("-----------------------------------------------------------------------------------")
     # os.system('cls' if os.name == 'nt' else 'clear')
 
 # Initial authentication of the server.
@@ -331,18 +344,16 @@ def load_chat(peer):
     
 
 def send_message(peer):
-    global username, server_pke
+    global username, server_pke, in_chat_with
     
-    print('kire khar')
+    in_chat_with = peer
 
     while True:
+        load_chat(peer)
         msg = input()
         if msg == ":back":
+            in_chat_with = None
             break
-        if msg == ":update":
-            clear_screen()
-            load_chat(peer)
-            continue
         else:
             nonce = random.randint(100000, 999999)
 
@@ -522,7 +533,7 @@ def show_menu():
             initiate_chat()
 
 def side_thread(socket, address):
-    global sender_chats
+    global sender_chats, in_chat_with
 
     while True:
         try:
@@ -614,7 +625,9 @@ def side_thread(socket, address):
 
 
                 timestamp = int(time.time())
-                save_message_to_database(peer, peer_to, peer_msg, timestamp, signiture='')
+                save_message_to_database(peer, username, peer_msg, timestamp, signiture='')
+                if peer == in_chat_with:
+                    load_chat(peer)
 
                 parameters = receiver_chats[peer]['parameters']
                 new_shared_key, df_public_key = Encryption.get_diffie_hellman_key(parameters, peer_public_df_key)
@@ -646,7 +659,7 @@ def side_thread(socket, address):
 
 
         except Exception as e:
-            raise e
+            continue
 
 
 def listen():
@@ -689,7 +702,7 @@ def start_client():
 
 
 if __name__ == "__main__":
-    with open("spubkey.pem", "rb") as key_file:
+    with open("keys\spubkey.pem", "rb") as key_file:
         server_pkey = serialization.load_pem_public_key(
         key_file.read())
     

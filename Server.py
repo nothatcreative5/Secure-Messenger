@@ -355,19 +355,19 @@ def new_connection(c, a):
 
 if __name__ == "__main__":
     makedb()
+    if not os.path.exists("keys"):
+        os.makedirs("keys")
     # if spubkey exists, load it
-    if os.path.exists("spubkey.pem") and os.path.exists("sprivkey.pem"):
-        f = open("spubkey.pem","rb")
+    if os.path.exists("keys\spubkey.pem") and os.path.exists("keys\sprivkey.pem"):
+        f = open("keys\spubkey.pem","rb")
         pub_key = serialization.load_pem_public_key(
-            f.read(),
-            backend=default_backend()
+            f.read()
         )
         f.close()
-        f = open("sprivkey.pem","rb")
+        f = open("keys\sprivkey.pem","rb")
         private_key = serialization.load_pem_private_key(
             f.read(),
-            password=None,
-            backend=default_backend()
+            password=None
         )
         f.close()
     else:
@@ -375,14 +375,14 @@ if __name__ == "__main__":
         pem = pub_key.public_bytes(
             encoding=serialization.Encoding.PEM,
             format=serialization.PublicFormat.PKCS1)
-        f = open("spubkey.pem","wb")
+        f = open("keys\spubkey.pem","wb")
         f.write(pem)
         f.close()
         pem = private_key.private_bytes(
             encoding=serialization.Encoding.PEM,
             format=serialization.PrivateFormat.PKCS8,
             encryption_algorithm=serialization.NoEncryption())
-        f = open("sprivkey.pem","wb")
+        f = open("keys\sprivkey.pem","wb")
         f.write(pem)
         f.close()
     
