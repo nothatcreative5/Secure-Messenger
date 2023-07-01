@@ -372,23 +372,21 @@ def send_message(peer):
             response = json.loads(Encryption.sym_decrypt(response, LTK))
             response = Encryption.sym_decrypt(response["cipher"], sender_chats[peer]['shared_key'])
             response = json.loads(response)
-
-            print('salam arya', response)
-            #FIX KON MAZANDARANI
-            if 1 == 1:
-                # save_message_to_database(username, peer, msg, signiture="", time="")
-
-                print('residim inja')
-                
+            
+            # Check nonce and peer
+            if response["nonce"] == nonce or response["from"] == peer:
+                timestamp = int(time.time())
+                save_message_to_database(username, peer, msg, timestamp, signiture='')
+                                
                 peer_public_df_key = response["public_df_key"]
                 peer_public_df_key = serialization.load_der_public_key(peer_public_df_key.encode(FORMAT))
                 private_df_key = sender_chats[peer]["private_df_key"]
                 parameters = sender_chats[peer]["parameters"]
                 next_cipher, next_public_df_key, next_private_df_key = Encryption.get_next_DH_key(parameters, peer_public_df_key, private_df_key)
 
-            sender_chats[peer]["shared_key"] = next_cipher
-            sender_chats[peer]["public_df_key"] = next_public_df_key
-            sender_chats[peer]["private_df_key"] = next_private_df_key
+                sender_chats[peer]["shared_key"] = next_cipher
+                sender_chats[peer]["public_df_key"] = next_public_df_key
+                sender_chats[peer]["private_df_key"] = next_private_df_key
 
     return 0
 
@@ -596,7 +594,6 @@ def side_thread(socket, address):
                 
                 shared_key = receiver_chats[peer]['shared_key']
                 cipher_plain = Encryption.sym_decrypt(cipher, shared_key)
-                print('shayan',cipher_plain)
                 cipher_plain = json.loads(cipher_plain)
 
                 
@@ -610,16 +607,14 @@ def side_thread(socket, address):
                 assert peer_msg_type == 'send_message'
                 assert peer_to == username
 
-                print(peer_msg, peer)
                 
                 if peer not in receiver_chats.keys():
                     print(bcolors.FAIL+"You have not initiated a chat with this user. Please initiate a chat first."+bcolors.ENDC)
                     continue
 
 
-
-
-                # save_message_to_database(sender, receiver, message, signiture, time)
+                timestamp = int(time.time())
+                save_message_to_database(peer, peer_to, peer_msg, timestamp, signiture='')
 
                 parameters = receiver_chats[peer]['parameters']
                 new_shared_key, df_public_key = Encryption.get_diffie_hellman_key(parameters, peer_public_df_key)
@@ -648,6 +643,7 @@ def side_thread(socket, address):
                 server_cipher = Encryption.sym_encrypt(json.dumps(data_to_server), LTK)
 
                 send(server_cipher)
+
 
         except Exception as e:
             raise e
