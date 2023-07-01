@@ -155,12 +155,6 @@ def register():
         }
 
         send(Encryption.sym_encrypt(json.dumps(data_to_send), LTK))
-        '''
-        response = {
-        cipher: "cipher",
-        signature: "signature",
-        }
-        '''
         response = json.loads(sock.recv(MAX_SIZE).decode())
         plain = Encryption.sym_decrypt(response["cipher"], LTK)
 
@@ -284,7 +278,8 @@ def logout():
 
 main_page = {":login" : "Login to an existing account", ":register" : "Create an account"}
 main_page_func = {":login" : login, ":register" : register}
-account_page = {":chat" : "Chat with an online user",":showonline" : "Show online users", ":logout" : "Logout from the account"}
+account_page = {":chat" : "Chat with an online user",":showonline" : "Show online users",
+                 ":logout" : "Logout from the account", ":change_keys" : "Change public and private keys"}
 
 
 commands = main_page.copy()
@@ -572,8 +567,51 @@ def initiate_chat():
         else:
             return -1
 
+def change_keys():
+    global username, password
+    nonce = random.randint(100000, 999999)
+    new_public_key, new_private_key = Encryption.genkeys(512 * 8)
 
-# Menu is a dictionary of commmands and their descriptions
+    try:
+        digest = hashes.Hash(hashes.SHA256())
+        digest.update(password.encode())
+        h_password = digest.finalize().hex()
+        data_to_send = {
+            "type": "change_keys",
+            "new_pbkey": Encryption.serialize_public_key(new_public_key),
+            "nonce": nonce,
+            "user": username,
+            "h_password": h_password
+        }
+        data_to_send = Encryption.sym_encrypt(json.dumps(data_to_send), LTK)
+        send(data_to_send)
+        print("Kir")
+        response = json.loads(sock.recv(MAX_SIZE).decode())
+        print("Koon")
+        response = Encryption.sym_decrypt(response, LTK)
+        print("Kos")
+        check, response = Encryption.check_sign(response, server_pkey)
+        if check != 0:
+            print("Server message is not signed correctly!")
+            return -1
+
+        returned_nonce = response['nonce']
+        if returned_nonce != nonce + 1:
+            print("Nonce is not returned correctly!")
+            return -1
+        
+        status = response["status"]
+        if status == "SUCC":
+            save_keys(new_public_key, new_private_key)
+            print("Keys are changed successfully!")
+        elif status == "FAILED":
+            print("Change key is denied by server!")
+
+    except Exception as e:
+        print(e)
+        print(bcolors.FAIL+"Couldn't communicate with the server :("+bcolors.ENDC)
+        return 0
+
 def show_menu():
     global commands
     
@@ -598,6 +636,8 @@ def show_menu():
             logout()
         elif command == ':chat':
             initiate_chat()
+        elif command == ":change_keys":
+            change_keys()
 
 def side_thread(socket, address):
     global sender_chats, in_chat_with

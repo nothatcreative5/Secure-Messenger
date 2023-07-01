@@ -73,6 +73,24 @@ def get_pbkey(uname):
     conn.close()
     return Encryption.deserialize_public_key(pbkey)
 
+def check_user_password(uname, h_passwd):
+    conn = sqlite3.connect('users.db')
+    cur = conn.cursor()
+    cur.execute("SELECT * from Users where username = '%s' and h_password = '%s'"%(uname, h_passwd))
+
+    rowcount = len(cur.fetchall())
+    conn.close()
+
+    if rowcount == 1:
+        return 0
+    else:
+        return -1
+
+def update_publicbkey(uname, pbkey):
+    conn = sqlite3.connect('users.db')
+    cur = conn.cursor()
+    cur.execute("UPDATE Users SET public_key = '%s' WHERE username = '%s'"%(pbkey, uname))
+
 def get_user_by_c(c):
     for user, socks in authorized_users.items():
         if socks["main_sock"] == c:
@@ -173,7 +191,7 @@ def new_connection(c, a):
             try:
                 payload = json.loads(Encryption.sym_decrypt(payload, client_keys[c]))
                 print(payload['type'])
-                if payload['type'] not in {"register", "login"}:
+                if payload['type'] not in {"register", "login", "change_keys"}:
                     uname = get_user_by_c(c)
                     check, payload = Encryption.check_sign(payload, get_pbkey(uname))
                     if check != 0:
@@ -398,6 +416,26 @@ def new_connection(c, a):
                     response = Encryption.sign(response, private_key)
                     cipher_s = Encryption.sym_encrypt(json.dumps(response), client_keys[authorized_users[peer]['main_sock']])
                     send_to_main_sock(cipher_s, peer)
+                elif payload['type'] == "change_keys":
+                    uname = payload["user"]
+                    h_password = payload["h_password"]
+                    new_public_key = payload["new_pbkey"]
+                    nonce = payload["nonce"]
+
+                    if check_user_password(uname, h_password) == 0:
+                        update_publicbkey(uname, new_public_key)
+                        response = {
+                            "status": "SUCC",
+                            "nonce": nonce + 1
+                        }
+                    else:
+                        response = {
+                            "status": "FAILED",
+                            "nonce": nonce + 1
+                        }
+                    response = Encryption.sign(response, private_key)
+                    response = Encryption.sym_encrypt(json.dumps(response), client_keys[authorized_users[uname]['main_sock']])
+                    send_to_main_sock(response, uname)
 
             except Exception as e:
                 raise e
