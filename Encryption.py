@@ -1,8 +1,5 @@
-import ast
-import hashlib
 from cryptography.hazmat.primitives import serialization
-import codecs
-import json
+import random
 
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -22,7 +19,9 @@ from cryptography.hazmat.primitives.asymmetric import padding
 
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import dh
-from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
+def get_nonce():
+    return random.randint(100000, 999999)
 
  
 def genkeys(size):

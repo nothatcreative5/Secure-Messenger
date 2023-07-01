@@ -128,6 +128,16 @@ def login(uname, passwd):
         return 1
     else:
         return 0
+    
+
+def remove_client(client_socket):
+    global connections, authorized_users, client_keys
+    client_socket.close()
+    if client_socket in connections:
+        del connections[connections.index(c)]
+    if client_socket in client_keys:
+        del client_keys[c]
+    authorized_users = {k: v for k, v in authorized_users.items() if v["main_sock"] != client_socket}
 
 
 def new_connection(c, a):
@@ -135,10 +145,16 @@ def new_connection(c, a):
     payload = c.recv(MAX_SIZE).decode()
     payload = json.loads(Encryption.asymmetric_dycrypt(payload, private_key))
     if payload['type'] == 'handshake':
-        nonce = payload['nonce']
-        outp = '{"command": "handshake", "status": "SUCC", "nonce": "%s"}'%nonce
-        signature = Encryption.signature(outp, private_key)
-        response = {'cipher': outp, 'signature': signature}
+        print(payload)
+        nonce = payload['nonce'] + 1
+        # outp = '{"command": "handshake", "status": "SUCC", "nonce": "%s"}'%nonce
+        outp = {
+            'command': 'handshake',
+            'status': 'SUCC',
+            'nonce': nonce
+        }
+        signature = Encryption.signature(json.dumps(outp), private_key)
+        response = {'cipher': json.dumps(outp), 'signature': signature}
         [key, iv] = payload['LTK']
         key = key.encode(FORMAT)
         iv = iv.encode(FORMAT) 
@@ -151,41 +167,44 @@ def new_connection(c, a):
             payload = c.recv(MAX_SIZE).decode()
             # payload = json.loads(c.recv(1024).decode())
         except Exception as e:
-            sock.close()
+            remove_client(c)
             print("Error - %s"%e)
             exit(-1)
             
-        # Currently makes no sense
         if(not(payload)):
             print("Connection closed by client.\n")
-            del connections[connections.index(c)]
-            del client_keys[c]
-            authorized_users = {k: v for k, v in authorized_users.items() if v["main_sock"] != c}
+            remove_client(c)
             break
 
         else:
             try:
-                payload = json.loads(Encryption.sym_decrypt(payload, client_keys[c]))
+                payload = json.loads(payload)
+                rec_signature = payload['signature']
+                rec_cipher = payload['cipher']
+                payload = json.loads(Encryption.sym_decrypt(payload['cipher'], client_keys[c]))
+                # payload = json.loads(Encryption.sym_decrypt(payload, client_keys[c]))
+                # payload = json.loads(Encryption.sym_decrypt(payload, client_keys[c]))
                 print(payload['type'])
                 if payload['type'] == 'register':
                     plain = payload['plain']
                     nonce = payload['nonce']
                     pbkey = register(plain['username'], plain['password'], plain['pbkey'])
 
+                    if Encryption.check_authenticity(rec_cipher, rec_signature, pbkey) == -1:
+                        raise Exception('Invalid signature')
 
                     outp = {
                         'command': 'register',
-                        'nonce': nonce,
+                        'nonce': nonce + 1,
                         'status': 'SUCC' if pbkey is not None else 'FAIL'
                     }
-                    # pbkey = Encryption.deserialize_public_key(plain["pbkey"])
 
                     if pbkey is None: 
                         print('Failed to register user')
                         return -1
                     cipher = Encryption.sym_encrypt(json.dumps(outp), client_keys[c])
-                    # signature = Encryption.signature(json.dumps(outp), private_key)
-                    response = {'cipher': cipher, 'status' : 'SUCC'}
+                    signature = Encryption.signature(cipher, private_key)
+                    response = {'cipher': cipher, 'status' : 'SUCC', 'signature': signature}
                     send(json.dumps(response), c)
                     print('User registered successfully!')
 
@@ -201,20 +220,25 @@ def new_connection(c, a):
                         
                         result = login(plain['username'], plain['password'])
 
+                        pbkey = get_pbkey(plain['username'])
+
+                        if Encryption.check_authenticity(rec_cipher, rec_signature, pbkey) == -1:
+                            raise Exception('Invalid signature')
+
                         outp = {
                             'command': 'login',
-                            'nonce': nonce
+                            'nonce': nonce + 1
                         }
 
-                        if result == 1:
+                        if result == 1 :
                             main_sock = c
                             side_port = payload['side_port']
                             side_sock = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
                             side_sock.connect(('127.0.0.1', side_port))
                             authorized_users[uname] = {'main_sock': main_sock, 'side_sock': side_sock}
-                            signature = Encryption.signature(json.dumps(outp), private_key)
                             LTK = client_keys[c]
                             cipher = Encryption.sym_encrypt(json.dumps(outp), LTK)
+                            signature = Encryption.signature(cipher, private_key)
                             response = {'cipher': cipher, 'signature': signature, 'status' : 'SUCC'}
                         else:
                             response = {'cipher': "", 'signature': "", 'status' : 'FAIL'}
@@ -232,9 +256,13 @@ def new_connection(c, a):
                         'nonce': nonce+1,
                         'online_users': online_users
                     }
-                    pbkey = get_pbkey(username)
-                    signature = Encryption.signature(json.dumps(outp), private_key)
+
+
+                    if Encryption.check_authenticity(rec_cipher, rec_signature, get_pbkey(username)) == -1:
+                        raise Exception('Invalid signature')
+
                     cipher = Encryption.sym_encrypt(json.dumps(outp), client_key)
+                    signature = Encryption.signature(cipher, private_key)
                     response = {'cipher': cipher, 'signature': signature}
                     send(json.dumps(response), c)
                     print('Online users sent successfully!')
@@ -246,10 +274,13 @@ def new_connection(c, a):
                     outp = {
                         'command': 'logout',
                         'status': 'SUCC',
-                        'nonce': nonce+1
+                        'nonce': nonce + 1
                     }
-                    signature = Encryption.signature(json.dumps(outp), private_key)
+                    if Encryption.check_authenticity(rec_cipher, rec_signature, get_pbkey(username)) == -1:
+                        raise Exception('Invalid signature')
+                    
                     cipher = Encryption.sym_encrypt(json.dumps(outp), client_key)
+                    signature = Encryption.signature(cipher, private_key)
                     response = {'cipher': cipher, 'signature': signature}
                     send(json.dumps(response), c)
                     authorized_users = {k: v for k, v in authorized_users.items() if v["main_sock"] != c}
@@ -259,8 +290,6 @@ def new_connection(c, a):
                     peer = payload['peer']
                     nonce = payload['nonce']
                     from_ = payload['from']
-
-                    print('salam')
 
                     peer_pbkey = Encryption.serialize_public_key(get_pbkey(peer))
 
@@ -387,8 +416,11 @@ if __name__ == "__main__":
         f.close()
     
     while True:
-        c,a = sock.accept()
-        connections.append(c)
-        thr = threading.Thread(target=new_connection,args=(c,a))
-        thr.daemon = True
-        thr.start()
+        try:
+            c,a = sock.accept()
+            connections.append(c)
+            thr = threading.Thread(target=new_connection,args=(c,a))
+            thr.daemon = True
+            thr.start()
+        except Exception:
+            continue

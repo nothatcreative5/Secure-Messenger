@@ -47,6 +47,7 @@ LTK = None
 def send(resp):
     sock.sendall(resp.encode())
 
+
 def save_message_to_database(sender, receiver, message, timestamp, signiture=""):
     global username, password
 
@@ -94,6 +95,7 @@ def register():
     publickey, privatekey = Encryption.genkeys(512 * 8)
 
     try:
+        nonce = Encryption.get_nonce()
         data_to_send = {
             "type": "register",
             "plain": {
@@ -101,23 +103,26 @@ def register():
             "password": passwd,
             "pbkey": Encryption.serialize_public_key(publickey),
             },
-            "nonce": "Nonce"
+            "nonce": nonce
         }
 
-        send(Encryption.sym_encrypt(json.dumps(data_to_send), LTK))
-        '''
-        response = {
-        cipher: "cipher",
-        signature: "signature",
+        cipher = Encryption.sym_encrypt(json.dumps(data_to_send), LTK)
+        signature = Encryption.signature(cipher, privatekey)
+
+        data_to_send = {
+            "cipher": cipher,
+            "signature": signature
         }
-        '''
+
+        send(json.dumps(data_to_send))
+
         response = json.loads(sock.recv(MAX_SIZE).decode())
         plain = Encryption.sym_decrypt(response["cipher"], LTK)
 
         if response["status"] == "FAIL":
             print(bcolors.FAIL+"Could not register. Please try again."+bcolors.ENDC)
             return -1
-        elif json.loads(plain)['nonce'] == "Nonce":
+        elif json.loads(plain)['nonce'] == nonce + 1 and Encryption.check_authenticity(response['cipher'], response["signature"], server_pkey) == 0:
             clear_screen()
             print(bcolors.OKGREEN + f"Successfuly registerd as {uname}" + bcolors.ENDC)
             return 0
@@ -135,34 +140,37 @@ def login():
     passwd = getpass.getpass(bcolors.OKBLUE+"Enter Password : "+bcolors.ENDC)
 
     try:
-
+        nonce = Encryption.get_nonce()
         data_to_send = {
             "type": "login",
             "plain": {
             "username": uname,
             "password": passwd,
             },
-            "nonce": "Nonce",
+            "nonce": nonce,
             "side_port": int(sys.argv[1])
         }
 
-        send(Encryption.sym_encrypt(json.dumps(data_to_send), LTK))
-        '''
-        response = {
-        cipher: "cipher",
-        signature: "signature",
+
+        cipher = Encryption.sym_encrypt(json.dumps(data_to_send), LTK)
+        signature = Encryption.signature(cipher, privatekey)
+
+        data_to_send = {
+            "cipher": cipher,
+            "signature": signature
         }
-        '''
+
+        send(json.dumps(data_to_send))
+
         response = json.loads(sock.recv(MAX_SIZE).decode())
+
         if response["status"] == "FAIL":
             print(bcolors.FAIL+"Could not login. Please try again."+bcolors.ENDC)
             return -1
         plain = Encryption.sym_decrypt(response["cipher"], LTK)
 
-        signature = response["signature"]
-
-        if Encryption.check_authenticity(plain, signature=signature, public_key=server_pkey) == 0 and \
-        json.loads(plain)['nonce'] == "Nonce":
+        if Encryption.check_authenticity(response['cipher'], signature=response['signature'], public_key=server_pkey) == 0 and \
+        json.loads(plain)['nonce'] == nonce + 1:
             
             clear_screen()
             print(bcolors.OKGREEN + f"Successfuly logged in as {uname}" + bcolors.ENDC)
@@ -179,18 +187,28 @@ def login():
 
 def show_online():
     global server_pkey
-    nonce = random.randint(100000, 999999)
+    nonce = Encryption.get_nonce()
     data_to_send = {
         "type": "show_online",
         "nonce": nonce,
         "user": username
     }
-    send(Encryption.sym_encrypt(json.dumps(data_to_send), LTK))
+
+    cipher = Encryption.sym_encrypt(json.dumps(data_to_send), LTK)
+    signature = Encryption.signature(cipher, privatekey)
+
+    data_to_send = {
+        "cipher": cipher,
+        "signature": signature
+    }
+
+    send(json.dumps(data_to_send))
+
     response = json.loads(sock.recv(MAX_SIZE).decode())
     plain = Encryption.sym_decrypt(response["cipher"], LTK)
     plain = json.loads(plain)
-    signature = response["signature"]
-    if plain["status"]=="SUCC" and plain['nonce'] == nonce + 1:
+    if plain["status"]=="SUCC" and plain['nonce'] == nonce + 1 and \
+        Encryption.check_authenticity(response['cipher'], response["signature"], public_key=server_pkey) == 0:
         # clear_screen()
         print(bcolors.OKGREEN + f"Online users : {', '.join(plain['online_users'])}" + bcolors.ENDC)
         return 0
@@ -200,18 +218,30 @@ def show_online():
     
 def logout():
     global server_pkey, commands
-    nonce = random.randint(100000, 999999)
+    nonce = Encryption.get_nonce()
     data_to_send = {
         "type": "logout",
         "nonce": nonce,
         "user": username
     }
-    send(Encryption.sym_encrypt(json.dumps(data_to_send), LTK))
+
+    cipher = Encryption.sym_encrypt(json.dumps(data_to_send), LTK)
+    signature = Encryption.signature(cipher, privatekey)
+
+
+    data_to_send = {
+        "cipher": cipher,
+        "signature": signature
+    }
+
+    send(json.dumps(data_to_send))
+
     response = json.loads(sock.recv(MAX_SIZE).decode())
     plain = Encryption.sym_decrypt(response["cipher"], LTK)
     plain = json.loads(plain)
-    signature = response["signature"]
-    if plain["status"]=="SUCC" and plain['nonce'] == nonce + 1:
+
+    if plain["status"]=="SUCC" and plain['nonce'] == nonce + 1 and \
+          Encryption.check_authenticity(response['cipher'], response['signature'], public_key=server_pkey) == 0:
         clear_screen()
         print(bcolors.OKGREEN + f"Successfuly logged out." + bcolors.ENDC)
         commands = main_page.copy()
@@ -219,8 +249,6 @@ def logout():
     else:
         print(bcolors.FAIL+"Could not logout. Please try again."+bcolors.ENDC)
         return -1
-    
-    # close database connection
     
 
 
@@ -232,7 +260,7 @@ account_page = {":chat" : "Chat with an online user",":showonline" : "Show onlin
 commands = main_page.copy()
 
 def clear_screen():
-    # pass
+    pass
     # os.system('cls' if os.name == 'nt' else 'clear')
 
 # Initial authentication of the server.
@@ -243,10 +271,11 @@ def handshake():
     try: 
         key = os.urandom(32)
         iv = os.urandom(16)
+        nonce = Encryption.get_nonce()
         LTK = Encryption.gen_sym_key(key, iv)
         data_to_send = {
             "type": "handshake",
-            "nonce" : "nonce",
+            "nonce" : nonce,
             "LTK": [key.decode(FORMAT), iv.decode(FORMAT)]
         }
         send(Encryption.asymmetric_encrypt(json.dumps(data_to_send), fname=None, publickey=server_pkey))
@@ -254,7 +283,7 @@ def handshake():
         plain = json.loads(response['cipher'])
         signature = response["signature"]
         if Encryption.check_authenticity(response['cipher'], signature,server_pkey) == 0 and \
-        plain['status'] == 'SUCC' and plain['nonce'] == 'nonce':
+        plain['status'] == 'SUCC' and plain['nonce'] == nonce + 1:
             return 1
         else:
             return 0
@@ -508,7 +537,7 @@ def show_menu():
         command = input()
         if command not in commands.keys():
             print(bcolors.FAIL+"Invalid command!"+bcolors.ENDC)
-            time.sleep(1)
+            time.sleep(0.5)
             continue 
         elif command == ":register":
             register()
@@ -646,7 +675,8 @@ def side_thread(socket, address):
 
 
         except Exception as e:
-            raise e
+            # raise e
+            continue
 
 
 def listen():
