@@ -47,7 +47,7 @@ LTK = None
 def send(resp):
     sock.sendall(resp.encode())
 
-def save_message_to_database(sender, receiver, message, signiture="", time=""):
+def save_message_to_database(sender, receiver, message, timestamp, signiture=""):
     global username, password
 
     # encrypt message using hash of the password
@@ -60,11 +60,11 @@ def save_message_to_database(sender, receiver, message, signiture="", time=""):
     enc_receiver = Encryption.sym_encrypt(receiver, key)
     enc_message = Encryption.sym_encrypt(message, key)
     enc_signiture = Encryption.sym_encrypt(signiture, key)
-    enc_timestamp = Encryption.sym_encrypt(timestamp, key)
+    enc_timestamp = Encryption.sym_encrypt(str(timestamp), key)
 
     # add message to database
     conn, curs = connect_to_database()
-    curs.execute("INSERT INTO messages VALUES (?, ?, ?, ?, ?)", (username, enc_sender, enc_receiver, enc_message, enc_signiture, enc_timestamp))
+    curs.execute("INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?)", (username, enc_sender, enc_receiver, enc_message, enc_signiture, enc_timestamp))
     conn.commit()
     conn.close()
 
@@ -232,7 +232,7 @@ account_page = {":chat" : "Chat with an online user",":showonline" : "Show onlin
 commands = main_page.copy()
 
 def clear_screen():
-    pass
+    # pass
     # os.system('cls' if os.name == 'nt' else 'clear')
 
 # Initial authentication of the server.
@@ -269,7 +269,7 @@ def initial_client():
     print(bcolors.OKBLUE+"Trying to connect and handshake with the server..."+bcolors.ENDC)
     
     try:
-        sock.connect(('127.0.0.1',16000))
+        sock.connect(('127.0.0.1',17000))
         # hard code babyyyy
         server_sock.bind(('127.0.0.1',int(sys.argv[1])))
         server_sock.listen(10)
@@ -301,7 +301,7 @@ def load_chat(peer):
     chat_messages = []
     items = curs.fetchall()
     for item in items:
-        sender, receiver, message, signiture, timestamp = item
+        owner, sender, receiver, message, signiture, timestamp = item
         sender = Encryption.sym_decrypt(sender, key)
         receiver = Encryption.sym_decrypt(receiver, key)
         if sender == peer or receiver == peer:
@@ -333,14 +333,16 @@ def load_chat(peer):
 def send_message(peer):
     global username, server_pke
     
-    load_chat(peer)
-
     print('kire khar')
 
     while True:
         msg = input()
         if msg == ":back":
             break
+        if msg == ":update":
+            clear_screen()
+            load_chat(peer)
+            continue
         else:
             nonce = random.randint(100000, 999999)
 
@@ -365,23 +367,17 @@ def send_message(peer):
 
             send(encrypted_data_to_send)
 
-            # A = sock.recv(MAX_SIZE).decode()
-
-            # print(A)
-
             # get ack from server
             response = sock.recv(MAX_SIZE).decode()
             response = json.loads(Encryption.sym_decrypt(response, LTK))
             response = Encryption.sym_decrypt(response["cipher"], sender_chats[peer]['shared_key'])
             response = json.loads(response)
-
-            print('salam arya', response)
-            #FIX KON MAZANDARANI
-            if 1 == 1:
-                # save_message_to_database(username, peer, msg, signiture="", time="")
-
-                print('residim inja')
-                
+            
+            # Check nonce and peer
+            if response["nonce"] == nonce or response["from"] == peer:
+                timestamp = int(time.time())
+                save_message_to_database(username, peer, msg, timestamp, signiture='')
+                                
                 peer_public_df_key = response["public_df_key"]
                 peer_public_df_key = serialization.load_der_public_key(peer_public_df_key.encode(FORMAT))
                 private_df_key = sender_chats[peer]["private_df_key"]
@@ -395,11 +391,14 @@ def send_message(peer):
     return 0
 
 
+
+
 def initiate_chat():
     global server_pkey, username
     nonce = random.randint(100000, 999999)
     peer = input("Enter the username of the user you want to chat with : ")
     if peer in sender_chats:
+        load_chat(peer)
         send_message(peer)
     else:
         data_to_send = {
@@ -491,9 +490,6 @@ def initiate_chat():
                 send_message(peer)
             else:
                 print("Error in exchanging keys")
-
-
-            print(bcolors.OKGREEN + f"Online users : {', '.join(plain['online_users'])}" + bcolors.ENDC)
         else:
             # print(bcolors.FAIL+"Could not get online users. Please try again."+bcolors.ENDC)
             return -1
@@ -586,7 +582,6 @@ def side_thread(socket, address):
 
                 send(server_cipher)
 
-                # print(bcolors.OKGREEN+json.dumps(plain)+bcolors.ENDC)
 
             elif plain['type'] == 'message':
                 
@@ -599,7 +594,6 @@ def side_thread(socket, address):
                 
                 shared_key = receiver_chats[peer]['shared_key']
                 cipher_plain = Encryption.sym_decrypt(cipher, shared_key)
-                print('shayan',cipher_plain)
                 cipher_plain = json.loads(cipher_plain)
 
                 
@@ -613,18 +607,14 @@ def side_thread(socket, address):
                 assert peer_msg_type == 'send_message'
                 assert peer_to == username
 
-                print(peer_msg, peer)
                 
                 if peer not in receiver_chats.keys():
                     print(bcolors.FAIL+"You have not initiated a chat with this user. Please initiate a chat first."+bcolors.ENDC)
                     continue
 
-                # print the msg with red color
-                print(bcolors.FAIL+peer_msg+bcolors.ENDC)
 
-
-
-                # save_message_to_database(sender, receiver, message, signiture, time)
+                timestamp = int(time.time())
+                save_message_to_database(peer, peer_to, peer_msg, timestamp, signiture='')
 
                 parameters = receiver_chats[peer]['parameters']
                 new_shared_key, df_public_key = Encryption.get_diffie_hellman_key(parameters, peer_public_df_key)
