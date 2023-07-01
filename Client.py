@@ -285,8 +285,8 @@ account_page = {":chat" : "Chat with an online user",":showonline" : "Show onlin
 commands = main_page.copy()
 
 def clear_screen():
-    print("-----------------------------------------------------------------------------------")
-    # os.system('cls' if os.name == 'nt' else 'clear')
+    # print("-----------------------------------------------------------------------------------")
+    os.system('cls' if os.name == 'nt' else 'clear')
 
 # Initial authentication of the server.
 def handshake():
@@ -342,9 +342,17 @@ def initial_client():
 def load_chat(peer):
     global username, password
     clear_screen()
+    terminal_width = 100
+    print(bcolors.OKGREEN + f"{username}💬" + bcolors.ENDC, "<===================>", end=' ')
+    print(bcolors.OKBLUE+f"🗨️{peer}"+bcolors.ENDC)
+
+    print((terminal_width + 1) * "-")
+
     if peer in receiver_chats and peer in sender_chats:
         print(receiver_chats[peer]['emojis'])
         print(sender_chats[peer]['emojis'])
+        print((terminal_width + 1) * '-')
+
     
     conn, curs = connect_to_database()
     curs.execute("SELECT * FROM Messages where owner = '%s'"%(username))
@@ -380,9 +388,17 @@ def load_chat(peer):
         # color sender based on the username
         if message["sender"] == username:
             sender_color = bcolors.OKGREEN
+            print(sender_color + f"{message['sender']}💬" + bcolors.ENDC)
+            print(sender_color + f" {message['message']}" + bcolors.ENDC)
         else:
             sender_color = bcolors.OKBLUE
-        print(sender_color + f"{message['sender']}: {message['message']}" + bcolors.ENDC)
+            print(f"")
+            padding = " " * (terminal_width - len(message['sender']) - 1) + "🗨️"
+            print(sender_color + f"{padding + message['sender']}")
+            padding = " " * (terminal_width - len(message['message']))
+            print(sender_color + f"{padding + message['message']}") 
+
+        # print(sender_color + f"{message['sender']}: {message['message']}" + bcolors.ENDC)
 
     
 
@@ -435,6 +451,11 @@ def send_message(peer):
                 peer_response = json.loads(peer_response)
                 peer_public_key = sender_chats[peer]["peer_pbkey"]
                 check, peer_response, signature = Encryption.check_sign(peer_response, peer_public_key, True)
+                if check != 0:
+                    print(bcolors.FAIL+"Message from peer is not signed correctly! Maybe he has changed his keys."+bcolors.ENDC)
+                    del sender_chats[peer]
+                    time.sleep(1)
+                    return -1
                 if peer_response["nonce"] == nonce or peer_response["from"] == peer:
                     timestamp = int(time.time())
                     save_message_to_database(username, peer, msg, timestamp, signature)
@@ -482,7 +503,7 @@ def initiate_chat():
 
         check, server_response = Encryption.check_sign(server_response, server_pkey)
         if check != 0:
-            print("Server message is not signed correctly!")
+            print(bcolors.FAIL+"Server message is not signed correctly!"+bcolors.ENDC)
             return -1
         if server_response["status"]=="SUCC" and server_response['nonce'] == nonce + 1:
             peer_pbkey = server_response["peer_pbkey"]
@@ -538,7 +559,8 @@ def initiate_chat():
             response = json.loads(response)
             check, response = Encryption.check_sign(response, server_pkey)
             if check != 0:
-                print("Server message is not signed correctly!")
+                print(bcolors.FAIL+"Server message is not signed correctly!"+bcolors.ENDC)
+                
                 return -1
             if response["type"] == "ReExchange" and response["to"] == username and response["from"] == peer:
                 # print(response["type"])
@@ -568,7 +590,7 @@ def initiate_chat():
             return -1
 
 def change_keys():
-    global username, password
+    global username, password, privatekey, publickey, sender_chats
     nonce = random.randint(100000, 999999)
     new_public_key, new_private_key = Encryption.genkeys(512 * 8)
 
@@ -588,7 +610,7 @@ def change_keys():
         response = json.loads(Encryption.sym_decrypt(sock.recv(MAX_SIZE).decode(), LTK))
         check, response = Encryption.check_sign(response, server_pkey)
         if check != 0:
-            print("Server message is not signed correctly!")
+            print(bcolors.FAIL+"Server message is not signed correctly!"+bcolors.ENDC)
             return -1
 
         returned_nonce = response['nonce']
@@ -598,7 +620,10 @@ def change_keys():
         
         status = response["status"]
         if status == "SUCC":
+            privatekey = new_private_key
+            publickey = new_public_key
             save_keys(username, new_public_key, new_private_key)
+            sender_chats = {}
             print("Keys are changed successfully!")
         elif status == "FAILED":
             print("Change key is denied by server!")
@@ -646,7 +671,7 @@ def side_thread(socket, address):
             print("log: type ", plain['type'])
             check, plain = Encryption.check_sign(plain, server_pkey)
             if check != 0:
-                print("Server message is not signed correctly!")
+                print(bcolors.FAIL+"Message from peer is not signed correctly!"+bcolors.ENDC)
                 continue
             if plain['type'] == 'Exchange':
                 cipher = plain['cipher']
@@ -660,7 +685,8 @@ def side_thread(socket, address):
                 cipher_plain = json.loads(cipher_plain)
                 check, cipher_plain = Encryption.check_sign(cipher_plain, peer_pbkey)
                 if check != 0:
-                    print("Message from peer is not signed correctly!")
+                    
+                    print(bcolors.FAIL+"Message from peer is not signed correctly!"+bcolors.ENDC)
                     continue
 
                 parameters = cipher_plain['parameters']
@@ -702,7 +728,6 @@ def side_thread(socket, address):
                 receiver_chats[peer]["public_df_key"] = df_public_key
                 receiver_chats[peer]['emojis'] = Encryption.emoji_converter(pickle.dumps(new_shared_key))
 
-                print(pickle.dumps(new_shared_key))
                 data_to_server = Encryption.sign(data_to_server, privatekey)
                 server_cipher = Encryption.sym_encrypt(json.dumps(data_to_server), LTK)
                 print("Sending ReExchange to server")
@@ -728,7 +753,7 @@ def side_thread(socket, address):
                     continue
 
                 if check != 0:
-                    print("Message from peer is not signed correctly!")
+                    print(bcolors.FAIL+"Message from peer is not signed correctly!"+bcolors.ENDC)
                     continue
 
                 peer_msg_type = cipher_plain['type']

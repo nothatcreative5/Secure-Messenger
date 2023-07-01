@@ -1,14 +1,9 @@
 import socket
 import threading
-import ast
 import sqlite3
 import os.path
 from os import path
-import codecs
-import hashlib
 import Encryption
-import Payload
-import sys
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives import hashes
 import json
@@ -90,6 +85,8 @@ def update_publicbkey(uname, pbkey):
     conn = sqlite3.connect('users.db')
     cur = conn.cursor()
     cur.execute("UPDATE Users SET public_key = '%s' WHERE username = '%s'"%(pbkey, uname))
+    conn.commit()
+    conn.close()
 
 def get_user_by_c(c):
     for user, socks in authorized_users.items():
