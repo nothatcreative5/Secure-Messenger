@@ -140,6 +140,27 @@ def check_authenticity(text, signature, public_key):
     except Exception:
         return -1
     
+def sign(data, private_key):
+    encoded_data = json.dumps(data)
+    signed_hash = signature(encoded_data, private_key)
+    data["signature"] = signed_hash
+    return data
+
+def check_sign(data, public_key, get_signature=False):
+    signature = data["signature"]
+    del data["signature"]
+    dumped_data = json.dumps(data)
+    check = check_authenticity(dumped_data, signature, public_key)
+    if get_signature:
+        if check == 0:
+            return 0, data, signature
+        else:
+            return -1, None, signature
+    else:
+        if check == 0:
+            return 0, data
+        else:
+            return -1, None
 
 def serialize_public_key(public_key):
     pem = public_key.public_bytes(

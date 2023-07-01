@@ -48,7 +48,7 @@ LTK = None
 def send(resp):
     sock.sendall(resp.encode())
 
-def save_message_to_database(sender, receiver, message, timestamp, signiture=""):
+def save_message_to_database(sender, receiver, message, timestamp, signature=""):
     global username, password
 
     # encrypt message using hash of the password
@@ -60,12 +60,12 @@ def save_message_to_database(sender, receiver, message, timestamp, signiture="")
     enc_sender = Encryption.sym_encrypt(sender, key)
     enc_receiver = Encryption.sym_encrypt(receiver, key)
     enc_message = Encryption.sym_encrypt(message, key)
-    enc_signiture = Encryption.sym_encrypt(signiture, key)
+    enc_signature = Encryption.sym_encrypt(signature, key)
     enc_timestamp = Encryption.sym_encrypt(str(timestamp), key)
 
     # add message to database
     conn, curs = connect_to_database()
-    curs.execute("INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?)", (username, enc_sender, enc_receiver, enc_message, enc_signiture, enc_timestamp))
+    curs.execute("INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?)", (username, enc_sender, enc_receiver, enc_message, enc_signature, enc_timestamp))
     conn.commit()
     conn.close()
 
@@ -233,13 +233,14 @@ def login():
 
 
 def show_online():
-    global server_pkey
+    global server_pkey, privatekey
     nonce = random.randint(100000, 999999)
     data_to_send = {
         "type": "show_online",
         "nonce": nonce,
         "user": username
     }
+    data_to_send = Encryption.sign(data_to_send, privatekey)
     send(Encryption.sym_encrypt(json.dumps(data_to_send), LTK))
     response = json.loads(sock.recv(MAX_SIZE).decode())
     plain = Encryption.sym_decrypt(response["cipher"], LTK)
@@ -261,6 +262,7 @@ def logout():
         "nonce": nonce,
         "user": username
     }
+    data_to_send = Encryption.sign(data_to_send, privatekey)
     send(Encryption.sym_encrypt(json.dumps(data_to_send), LTK))
     response = json.loads(sock.recv(MAX_SIZE).decode())
     plain = Encryption.sym_decrypt(response["cipher"], LTK)
@@ -360,19 +362,19 @@ def load_chat(peer):
     chat_messages = []
     items = curs.fetchall()
     for item in items:
-        owner, sender, receiver, message, signiture, timestamp = item
+        owner, sender, receiver, message, signature, timestamp = item
         sender = Encryption.sym_decrypt(sender, key)
         receiver = Encryption.sym_decrypt(receiver, key)
         if sender == peer or receiver == peer:
             message = Encryption.sym_decrypt(message, key)
-            signiture = Encryption.sym_decrypt(signiture, key)
+            signature = Encryption.sym_decrypt(signature, key)
             timestamp = Encryption.sym_decrypt(timestamp, key)
         
             chat_messages.append({
                 "sender": sender,
                 "receiver": receiver,
                 "message": message,
-                "signiture": signiture,
+                "signature": signature,
                 "timestamp": timestamp
             })
 
@@ -411,6 +413,7 @@ def send_message(peer):
                 "message": msg,
                 "new_public_df_key": sender_chats[peer]["public_df_key"]
             }
+            data_to_peer = Encryption.sign(data_to_peer, privatekey)
             encrypted_data_to_peer = Encryption.sym_encrypt(json.dumps(data_to_peer), sender_chats[peer]["shared_key"])
 
             data_to_send = {
@@ -420,6 +423,7 @@ def send_message(peer):
                 "to": peer,
                 "cipher": encrypted_data_to_peer
             }
+            data_to_send = Encryption.sign(data_to_send, privatekey)
             encrypted_data_to_send = Encryption.sym_encrypt(json.dumps(data_to_send), LTK)
 
             send(encrypted_data_to_send)
@@ -427,13 +431,18 @@ def send_message(peer):
             # get ack from server
             response = sock.recv(MAX_SIZE).decode()
             server_response = json.loads(Encryption.sym_decrypt(response, LTK))
-            
+            check, server_response = Encryption.check_sign(server_response, server_pkey)
+            if check != 0:
+                print("Server message is not signed correctly!")
+                return -1
             if server_response["status"] == "SUCC":
                 peer_response = Encryption.sym_decrypt(server_response["cipher"], sender_chats[peer]['shared_key'])
                 peer_response = json.loads(peer_response)
+                peer_public_key = sender_chats[peer]["peer_pbkey"]
+                check, peer_response, signature = Encryption.check_sign(peer_response, peer_public_key, True)
                 if peer_response["nonce"] == nonce or peer_response["from"] == peer:
                     timestamp = int(time.time())
-                    save_message_to_database(username, peer, msg, timestamp, signiture='')
+                    save_message_to_database(username, peer, msg, timestamp, signature)
                                     
                     peer_public_df_key = peer_response["public_df_key"]
                     peer_public_df_key = serialization.load_der_public_key(peer_public_df_key.encode(FORMAT))
@@ -447,12 +456,11 @@ def send_message(peer):
             elif server_response["status"] == "NOT_SUCH_ONLINE_USER":
                 print(bcolors.FAIL + f"{peer} is not online!" + bcolors.ENDC)
                 sender_chats.pop(peer)
+                in_chat_with = None
                 time.sleep(1)
                 break
 
     return 0
-
-
 
 
 def initiate_chat():
@@ -469,14 +477,18 @@ def initiate_chat():
             "from": username,
             "peer": peer 
         }
+        data_to_send = Encryption.sign(data_to_send, privatekey)
         send(Encryption.sym_encrypt(json.dumps(data_to_send), LTK))
 
         # get response from server
         response = json.loads(sock.recv(MAX_SIZE).decode())
-        server_response = Encryption.sym_decrypt(response["cipher"], LTK)
+        server_response = Encryption.sym_decrypt(response, LTK)
         server_response = json.loads(server_response)
 
-        # signature = response["signature"]
+        check, server_response = Encryption.check_sign(server_response, server_pkey)
+        if check != 0:
+            print("Server message is not signed correctly!")
+            return -1
         if server_response["status"]=="SUCC" and server_response['nonce'] == nonce + 1:
             peer_pbkey = server_response["peer_pbkey"]
             # peer-public public diffey private diffey diffey ghabli
@@ -503,7 +515,8 @@ def initiate_chat():
                 "to": peer,
                 "nonce": nonce
             }
-            
+            response = Encryption.sign(response, privatekey)
+
             key = os.urandom(32)
             iv = os.urandom(16)
             shared_key_1 = Encryption.gen_sym_key(key, iv)
@@ -518,8 +531,7 @@ def initiate_chat():
                 "key": encrypted_key
             }
 
-            # signature = Encryption.signature(json.dumps(response), user_keys[username][1])
-            # print(signature)
+            data_to_send = Encryption.sign(data_to_send, privatekey)
             
 
             server_cipher = Encryption.sym_encrypt(json.dumps(data_to_send), LTK)
@@ -529,6 +541,10 @@ def initiate_chat():
             response = sock.recv(MAX_SIZE).decode()
             response = Encryption.sym_decrypt(response, LTK)
             response = json.loads(response)
+            check, response = Encryption.check_sign(response, server_pkey)
+            if check != 0:
+                print("Server message is not signed correctly!")
+                return -1
             if response["type"] == "ReExchange" and response["to"] == username and response["from"] == peer:
                 # print(response["type"])
                 cipher = response["cipher"]
@@ -592,9 +608,13 @@ def side_thread(socket, address):
             plain = Encryption.sym_decrypt(data, LTK)
             plain = json.loads(plain)
             print("log: type ", plain['type'])
+            check, plain = Encryption.check_sign(plain, server_pkey)
+            if check != 0:
+                print("Server message is not signed correctly!")
+                continue
             if plain['type'] == 'Exchange':
                 cipher = plain['cipher']
-                peer_pbkey = plain['peer_pbkey']
+                peer_pbkey = Encryption.deserialize_public_key(plain['peer_pbkey'])
                 key_cipher = plain['key']
                 key_iv = json.loads(Encryption.asymmetric_dycrypt(key_cipher, privatekey))
                 
@@ -602,6 +622,11 @@ def side_thread(socket, address):
                 shared_key = Encryption.gen_sym_key(key_iv['key'].encode(FORMAT), key_iv['iv'].encode(FORMAT))
                 cipher_plain = Encryption.sym_decrypt(cipher, shared_key)
                 cipher_plain = json.loads(cipher_plain)
+                check, cipher_plain = Encryption.check_sign(cipher_plain, peer_pbkey)
+                if check != 0:
+                    print("Message from peer is not signed correctly!")
+                    continue
+
                 parameters = cipher_plain['parameters']
                 peer_public_df_key = cipher_plain['public_df_key']
                 peer = cipher_plain['from']
@@ -628,7 +653,7 @@ def side_thread(socket, address):
                     "to": peer,
                     "public_df_key": df_public_key
                 }
-
+                data_to_peer = Encryption.sign(data_to_peer, privatekey)
                 encrypted_response = Encryption.sym_encrypt(json.dumps(data_to_peer), shared_key)
                 data_to_server = {
                     "cipher": encrypted_response,
@@ -642,7 +667,7 @@ def side_thread(socket, address):
                 receiver_chats[peer]['emojis'] = Encryption.emoji_converter(pickle.dumps(new_shared_key))
 
                 print(pickle.dumps(new_shared_key))
-
+                data_to_server = Encryption.sign(data_to_server, privatekey)
                 server_cipher = Encryption.sym_encrypt(json.dumps(data_to_server), LTK)
                 print("Sending ReExchange to server")
                 send(server_cipher)
@@ -660,8 +685,16 @@ def side_thread(socket, address):
                 shared_key = receiver_chats[peer]['shared_key']
                 cipher_plain = Encryption.sym_decrypt(cipher, shared_key)
                 cipher_plain = json.loads(cipher_plain)
+                peer_public_key = receiver_chats[peer]["peer_pbkey"]
+                check, cipher_plain, signature = Encryption.check_sign(cipher_plain, peer_public_key, True)
+                if peer not in receiver_chats.keys():
+                    print(bcolors.FAIL+"You have not initiated a chat with this user. Please initiate a chat first."+bcolors.ENDC)
+                    continue
 
-                
+                if check != 0:
+                    print("Message from peer is not signed correctly!")
+                    continue
+
                 peer_msg_type = cipher_plain['type']
                 peer = cipher_plain['from']
                 peer_to = cipher_plain['to']
@@ -672,14 +705,8 @@ def side_thread(socket, address):
                 assert peer_msg_type == 'send_message'
                 assert peer_to == username
 
-                
-                if peer not in receiver_chats.keys():
-                    print(bcolors.FAIL+"You have not initiated a chat with this user. Please initiate a chat first."+bcolors.ENDC)
-                    continue
-
-
                 timestamp = int(time.time())
-                save_message_to_database(peer, username, peer_msg, timestamp, signiture='')
+                save_message_to_database(peer, username, peer_msg, timestamp, signature)
                 if peer == in_chat_with:
                     load_chat(peer)
 
@@ -698,7 +725,7 @@ def side_thread(socket, address):
                     "to": peer,
                     "public_df_key": df_public_key
                 }
-
+                data_to_peer = Encryption.sign(data_to_peer, privatekey)
                 encrypted_response = Encryption.sym_encrypt(json.dumps(data_to_peer), shared_key)
                 data_to_server = {
                     "cipher": encrypted_response,
@@ -706,14 +733,14 @@ def side_thread(socket, address):
                     "from": username,
                     "to": peer
                 }
-
+                data_to_server = Encryption.sign(data_to_server, privatekey)
                 server_cipher = Encryption.sym_encrypt(json.dumps(data_to_server), LTK)
 
                 send(server_cipher)
 
 
         except Exception as e:
-            raise e
+            # raise e
             continue
 
 

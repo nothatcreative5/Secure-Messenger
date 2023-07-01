@@ -73,6 +73,12 @@ def get_pbkey(uname):
     conn.close()
     return Encryption.deserialize_public_key(pbkey)
 
+def get_user_by_c(c):
+    for user, socks in authorized_users.items():
+        if socks["main_sock"] == c:
+            return user
+    return -1
+
 def send(resp,c):
     c.sendall(resp.encode())
 
@@ -131,7 +137,7 @@ def login(uname, passwd):
 
 
 def new_connection(c, a):
-    global authorized_users, client_keys
+    global authorized_users, client_keys, private_key
     payload = c.recv(MAX_SIZE).decode()
     payload = json.loads(Encryption.asymmetric_dycrypt(payload, private_key))
     if payload['type'] == 'handshake':
@@ -167,6 +173,15 @@ def new_connection(c, a):
             try:
                 payload = json.loads(Encryption.sym_decrypt(payload, client_keys[c]))
                 print(payload['type'])
+                if payload['type'] not in {"register", "login"}:
+                    uname = get_user_by_c(c)
+                    check, payload = Encryption.check_sign(payload, get_pbkey(uname))
+                    if check != 0:
+                        print("Message is not signed correctly!")
+                        continue
+                    else:
+                        print("signature checked successfully!")
+                
                 if payload['type'] == 'register':
                     plain = payload['plain']
                     nonce = payload['nonce']
@@ -275,9 +290,8 @@ def new_connection(c, a):
                             'peer_pbkey': peer_pbkey,
                         }
                     client_key = client_keys[c]
-                    signature = Encryption.signature(json.dumps(response), private_key)
-                    cipher = Encryption.sym_encrypt(json.dumps(response), client_key)
-                    response = {'cipher': cipher, 'signature': signature}
+                    response = Encryption.sign(response, private_key)
+                    response = Encryption.sym_encrypt(json.dumps(response), client_key)
                     send(json.dumps(response), c)
                 elif payload['type'] == "Exchange":   
                     peer = payload['to']
@@ -291,18 +305,20 @@ def new_connection(c, a):
                             'status': 'NOT_SUCH_ONLINE_USER',
                             'nonce': nonce+1
                             }
-                        cipher_s = Encryption.sym_encrypt(json.dumps(response), client_keys[authorized_users[from_]['main_sock']])
-                        send_to_side_sock(cipher_s, from_)
+                        response = Encryption.sign(response, private_key)
+                        response = Encryption.sym_encrypt(json.dumps(response), client_keys[authorized_users[from_]['main_sock']])
+                        send_to_main_sock(response, from_)
                     else:
                         response = {
                             "type": "Exchange",
                             "status": "SUCC",
                             "cipher": cipher,
-                            "peer_pbkey": Encryption.serialize_public_key(get_pbkey(peer)),
+                            "peer_pbkey": Encryption.serialize_public_key(get_pbkey(from_)),
                             "key": temp_key,
                         }
-                        cipher_s = Encryption.sym_encrypt(json.dumps(response), client_keys[authorized_users[peer]['main_sock']])
-                        send_to_side_sock(cipher_s, peer)
+                        response = Encryption.sign(response, private_key)
+                        response = Encryption.sym_encrypt(json.dumps(response), client_keys[authorized_users[peer]['main_sock']])
+                        send_to_side_sock(response, peer)
 
                 elif payload['type'] == "ReExchange":
 
@@ -317,7 +333,7 @@ def new_connection(c, a):
                         "from": from_,
                         "to": peer,
                     }
-
+                    response = Encryption.sign(response, private_key)
                     cipher_s = Encryption.sym_encrypt(json.dumps(response), client_keys[authorized_users[peer]['main_sock']])
                     print(response)
                     print(f"Sent to {peer}")
@@ -337,6 +353,7 @@ def new_connection(c, a):
                             "to": peer,
                             "nonce": nonce,
                         }
+                        response = Encryption.sign(response, private_key)
                         cipher_s = Encryption.sym_encrypt(json.dumps(response), client_keys[authorized_users[from_]['main_sock']])
                         send_to_main_sock(cipher_s, from_)
                     elif peer not in authorized_users:
@@ -347,6 +364,7 @@ def new_connection(c, a):
                             "to": peer,
                             "nonce": nonce,
                         }
+                        response = Encryption.sign(response, private_key)
                         cipher_s = Encryption.sym_encrypt(json.dumps(response), client_keys[authorized_users[from_]['main_sock']])
                         send_to_main_sock(cipher_s, from_)
                     else:
@@ -359,6 +377,7 @@ def new_connection(c, a):
                             "to": peer,
                             "nonce": nonce,
                         }
+                        response = Encryption.sign(response, private_key)
                         cipher_s = Encryption.sym_encrypt(json.dumps(response), client_keys[authorized_users[peer]['main_sock']])
                         send_to_side_sock(cipher_s, peer)
 
@@ -376,10 +395,8 @@ def new_connection(c, a):
                         "to": peer,
                     }
 
-                    print('server hastam',response)
-
+                    response = Encryption.sign(response, private_key)
                     cipher_s = Encryption.sym_encrypt(json.dumps(response), client_keys[authorized_users[peer]['main_sock']])
-                    print('kir khori?', cipher_s)
                     send_to_main_sock(cipher_s, peer)
 
             except Exception as e:
