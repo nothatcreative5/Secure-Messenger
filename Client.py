@@ -45,6 +45,10 @@ server_pkey = None
 LTK = None
 
 
+b = None
+arya = 'ANN'
+
+
 def send(resp):
     sock.sendall(resp.encode())
 
@@ -84,37 +88,59 @@ def raw_initialization():
 
     print("Variables are raw initialized!")
 
-def save_keys(uname, publickey, privatekey):
+
+def save_keys(uname, publickey, privatekey, password):
+    global b, arya
     try:
         with open(f"keys\{uname}_public.pem", "wb") as f:
             f.write(publickey.public_bytes(
                 encoding=serialization.Encoding.PEM,
                 format=serialization.PublicFormat.SubjectPublicKeyInfo
             ))
-        with open(f"keys\{uname}_private.pem", "wb") as f:
-            f.write(privatekey.private_bytes(
+
+        digest = hashes.Hash(hashes.SHA256())
+        digest.update(password.encode())
+
+        key = Encryption.cipher_from_hash(digest)
+
+        private_bytes = privatekey.private_bytes(
                 encoding=serialization.Encoding.PEM,
                 format=serialization.PrivateFormat.PKCS8,
                 encryption_algorithm=serialization.NoEncryption()
-            ))
+            )
+        
+        private_bytes = Encryption.sym_encrypt(private_bytes.decode(FORMAT), key).encode(FORMAT)
+
+
+        with open(f"keys\{uname}_private.pem", "wb") as f:
+            f.write(private_bytes)
         print("Keys are saved successfully!")
-    except e:
+    except Exception as e:
         print(e)
 
 def load_keys(uname):
+    global arya
     try:
         with open(f"keys\{uname}_public.pem", "rb") as f:
             publickey = serialization.load_pem_public_key(
                 f.read()
             )
+        
+        digest = hashes.Hash(hashes.SHA256())
+        digest.update(password.encode())
+
+        key = Encryption.cipher_from_hash(digest)
+
         with open(f"keys\{uname}_private.pem", "rb") as f:
+
             privatekey = serialization.load_pem_private_key(
-                f.read(),
-                password=None
+                Encryption.sym_decrypt(f.read().decode(FORMAT), key).encode(FORMAT),
+                password = None
             )
+
         print("Keys are loaded successfully!")
         return publickey, privatekey
-    except e:
+    except Exception as e:
         print("Error in loading keys!")
         print(e)
     
@@ -143,6 +169,8 @@ def register():
 
     publickey, privatekey = Encryption.genkeys(512 * 8)
 
+    nonce = random.randint(100000, 999999)
+
     try:
         data_to_send = {
             "type": "register",
@@ -151,21 +179,25 @@ def register():
             "password": passwd,
             "pbkey": Encryption.serialize_public_key(publickey),
             },
-            "nonce": "Nonce"
+            "nonce": nonce
         }
 
         send(Encryption.sym_encrypt(json.dumps(data_to_send), LTK))
-        response = json.loads(sock.recv(MAX_SIZE).decode())
-        plain = Encryption.sym_decrypt(response["cipher"], LTK)
 
-        if response["status"] == "FAIL":
+
+        response = Encryption.sym_decrypt(sock.recv(MAX_SIZE).decode(), LTK)
+        response = json.loads(response)
+
+        check, data = Encryption.check_sign(response, server_pkey)
+        
+        if check != 0 or data['status'] == "FAIL" or data['nonce'] != nonce + 1:
             print(bcolors.FAIL+"Could not register. Please try again."+bcolors.ENDC)
             return -1
-        elif json.loads(plain)['nonce'] == "Nonce":
-            clear_screen()
-            print(bcolors.OKGREEN + f"Successfuly registerd as {uname}" + bcolors.ENDC)
-            save_keys(uname, publickey, privatekey)
-            return 0
+
+        clear_screen()
+        print(bcolors.OKGREEN + f"Successfuly registerd as {uname}" + bcolors.ENDC)
+        save_keys(uname, publickey, privatekey, passwd)
+        return 0
 
     except Exception as e:
         print(e)
@@ -280,6 +312,7 @@ main_page = {":login" : "Login to an existing account", ":register" : "Create an
 main_page_func = {":login" : login, ":register" : register}
 account_page = {":chat" : "Chat with an online user",":showonline" : "Show online users",
                  ":logout" : "Logout from the account", ":change_keys" : "Change public and private keys"}
+
 
 
 commands = main_page.copy()
@@ -408,73 +441,83 @@ def send_message(peer):
     in_chat_with = peer
 
     while True:
-        load_chat(peer)
-        msg = input()
-        if msg == ":back":
-            in_chat_with = None
-            break
-        else:
-            nonce = random.randint(100000, 999999)
-
-            data_to_peer = {
-                "type": "send_message",
-                "nonce": nonce,
-                "from": username,
-                "to": peer,
-                "message": msg,
-                "new_public_df_key": sender_chats[peer]["public_df_key"]
-            }
-            data_to_peer = Encryption.sign(data_to_peer, privatekey)
-            encrypted_data_to_peer = Encryption.sym_encrypt(json.dumps(data_to_peer), sender_chats[peer]["shared_key"])
-
-            data_to_send = {
-                "type": "send_message",
-                "nonce": nonce,
-                "from": username,
-                "to": peer,
-                "cipher": encrypted_data_to_peer
-            }
-            data_to_send = Encryption.sign(data_to_send, privatekey)
-            encrypted_data_to_send = Encryption.sym_encrypt(json.dumps(data_to_send), LTK)
-
-            send(encrypted_data_to_send)
-
-            # get ack from server
-            response = sock.recv(MAX_SIZE).decode()
-            server_response = json.loads(Encryption.sym_decrypt(response, LTK))
-            check, server_response = Encryption.check_sign(server_response, server_pkey)
-            if check != 0:
-                print("Server message is not signed correctly!")
-                return -1
-            if server_response["status"] == "SUCC":
-                peer_response = Encryption.sym_decrypt(server_response["cipher"], sender_chats[peer]['shared_key'])
-                peer_response = json.loads(peer_response)
-                peer_public_key = sender_chats[peer]["peer_pbkey"]
-                check, peer_response, signature = Encryption.check_sign(peer_response, peer_public_key, True)
-                if check != 0:
-                    print(bcolors.FAIL+"Message from peer is not signed correctly! Maybe he has changed his keys."+bcolors.ENDC)
-                    del sender_chats[peer]
-                    time.sleep(1)
-                    return -1
-                if peer_response["nonce"] == nonce or peer_response["from"] == peer:
-                    timestamp = int(time.time())
-                    save_message_to_database(username, peer, msg, timestamp, signature)
-                                    
-                    peer_public_df_key = peer_response["public_df_key"]
-                    peer_public_df_key = serialization.load_der_public_key(peer_public_df_key.encode(FORMAT))
-                    private_df_key = sender_chats[peer]["private_df_key"]
-                    parameters = sender_chats[peer]["parameters"]
-                    next_cipher, next_public_df_key, next_private_df_key = Encryption.get_next_DH_key(parameters, peer_public_df_key, private_df_key)
-
-                    sender_chats[peer]["shared_key"] = next_cipher
-                    sender_chats[peer]["public_df_key"] = next_public_df_key
-                    sender_chats[peer]["private_df_key"] = next_private_df_key
-            elif server_response["status"] == "NOT_SUCH_ONLINE_USER":
-                print(bcolors.FAIL + f"{peer} is not online!" + bcolors.ENDC)
-                sender_chats.pop(peer)
+        try:
+            load_chat(peer)
+            msg = input()
+            if msg == ":back":
                 in_chat_with = None
-                time.sleep(1)
                 break
+            else:
+                nonce = random.randint(100000, 999999)
+
+                data_to_peer = {
+                    "type": "send_message",
+                    "nonce": nonce,
+                    "from": username,
+                    "to": peer,
+                    "message": msg,
+                    "new_public_df_key": sender_chats[peer]["public_df_key"]
+                }
+                data_to_peer = Encryption.sign(data_to_peer, privatekey)
+                encrypted_data_to_peer = Encryption.sym_encrypt(json.dumps(data_to_peer), sender_chats[peer]["shared_key"])
+
+                data_to_send = {
+                    "type": "send_message",
+                    "nonce": nonce,
+                    "from": username,
+                    "to": peer,
+                    "cipher": encrypted_data_to_peer
+                }
+                data_to_send = Encryption.sign(data_to_send, privatekey)
+                encrypted_data_to_send = Encryption.sym_encrypt(json.dumps(data_to_send), LTK)
+
+                send(encrypted_data_to_send)
+
+                # get ack from server
+                sock.settimeout(5.0)
+                response = sock.recv(MAX_SIZE).decode()
+                sock.settimeout(None)
+                server_response = json.loads(Encryption.sym_decrypt(response, LTK))
+                check, server_response = Encryption.check_sign(server_response, server_pkey)
+                if check != 0:
+                    print("Server message is not signed correctly!")
+                    return -1
+                if server_response["status"] == "SUCC":
+                    peer_response = Encryption.sym_decrypt(server_response["cipher"], sender_chats[peer]['shared_key'])
+                    peer_response = json.loads(peer_response)
+                    peer_public_key = sender_chats[peer]["peer_pbkey"]
+                    check, peer_response, signature = Encryption.check_sign(peer_response, peer_public_key, True)
+                    if check != 0:
+                        print(bcolors.FAIL+"Message from peer is not signed correctly! Maybe he has changed his keys."+bcolors.ENDC)
+                        del sender_chats[peer]
+                        time.sleep(1)
+                        return -1
+                    if peer_response["nonce"] == nonce or peer_response["from"] == peer:
+                        timestamp = int(time.time())
+                        save_message_to_database(username, peer, msg, timestamp, signature)
+                                        
+                        peer_public_df_key = peer_response["public_df_key"]
+                        peer_public_df_key = serialization.load_der_public_key(peer_public_df_key.encode(FORMAT))
+                        private_df_key = sender_chats[peer]["private_df_key"]
+                        parameters = sender_chats[peer]["parameters"]
+                        next_cipher, next_public_df_key, next_private_df_key = Encryption.get_next_DH_key(parameters, peer_public_df_key, private_df_key)
+
+                        sender_chats[peer]["shared_key"] = next_cipher
+                        sender_chats[peer]["public_df_key"] = next_public_df_key
+                        sender_chats[peer]["private_df_key"] = next_private_df_key
+                elif server_response["status"] == "NOT_SUCH_ONLINE_USER":
+                    print(bcolors.FAIL + f"{peer} is not online!" + bcolors.ENDC)
+                    sender_chats.pop(peer)
+                    in_chat_with = None
+                    time.sleep(1)
+                    break
+        except Exception:
+            sock.settimeout(None)
+            print(bcolors.FAIL + f"{peer} is not avaiable!" + bcolors.ENDC)
+            sender_chats.pop(peer)
+            in_chat_with = None
+            time.sleep(1)
+            break
 
     return 0
 
@@ -632,6 +675,28 @@ def change_keys():
         print(e)
         print(bcolors.FAIL+"Couldn't communicate with the server :("+bcolors.ENDC)
         return 0
+    
+
+def create_group():
+    global server_pkey, username
+    nonce = random.randint(100000, 999999)
+    group_name = input("Enter the name of your group : ")
+
+    try:
+        data_to_send = {
+            "type": "create_group",
+            "nonce": nonce,
+            "username": username,
+            "group_name": group_name 
+        }
+        data_to_send = Encryption.sign(data_to_send, privatekey)
+        send(Encryption.sym_encrypt(json.dumps(data_to_send), LTK))
+
+    except Exception:
+        print(e)
+        print(bcolors.FAIL+"Couldn't communicate with the server :("+bcolors.ENDC)
+        return 0
+
 
 def show_menu():
     global commands
@@ -659,6 +724,9 @@ def show_menu():
             initiate_chat()
         elif command == ":change_keys":
             change_keys()
+        elif command == ":create_group":
+            create_group()
+
 
 def side_thread(socket, address):
     global sender_chats, in_chat_with

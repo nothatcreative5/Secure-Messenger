@@ -1,6 +1,7 @@
 import socket
 import threading
 import sqlite3
+import random
 import os.path
 from os import path
 import Encryption
@@ -47,15 +48,15 @@ def makedb():
             FOREIGN KEY(sender) REFERENCES Users(username),
             FOREIGN KEY(receiver) REFERENCES Users(username));
         CREATE TABLE IF NOT EXISTS Groups(
-            group_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+            group_name NOT NULL PRIMARY KEY,
             owner,
             FOREIGN KEY(owner) REFERENCES Users(username));
         CREATE TABLE IF NOT EXISTS Group_Members(
-            group_id INTEGER NOT NULL,
-            user_id INTEGER NOT NULL,
-            PRIMARY KEY (group_id, user_id),
-            FOREIGN KEY(user_id) REFERENCES Users(username),
-            FOREIGN KEY(group_id) REFERENCES Groups(group_id));
+            group_name NOT NULL,
+            username NOT NULL,
+            PRIMARY KEY (group_name, username),
+            FOREIGN KEY(username) REFERENCES Users(username),
+            FOREIGN KEY(group_name) REFERENCES Groups(group_name));
         '''
         cur.executescript(sql)
         conn.close()
@@ -108,12 +109,13 @@ def register(uname, passwd, pub_key):
     conn = sqlite3.connect('users.db')
 
     cursor = conn.execute("SELECT username from users where username='%s'"%(uname))
+
     rowcount = len(cursor.fetchall())
 
     # sys.exit(-1)
     
     if rowcount > 0:
-        return -1
+        return None
 
     else:
         try:
@@ -133,6 +135,12 @@ def register(uname, passwd, pub_key):
             return get_pbkey(uname)
         except Exception:
             return None
+        
+def create_group(username, group_name):
+
+    conn = sqlite3.connect('users.db')
+
+    cursor = conn.execute("SELECT * from Groups where group_name = '%s';"%(group_name))
         
 
 def login(uname, passwd):
@@ -202,22 +210,22 @@ def new_connection(c, a):
                     nonce = payload['nonce']
                     pbkey = register(plain['username'], plain['password'], plain['pbkey'])
 
-
+ 
                     outp = {
-                        'command': 'register',
-                        'nonce': nonce,
-                        'status': 'SUCC' if pbkey is not None else 'FAIL'
+                    'command': 'register',
+                    'nonce': nonce + 1,
+                    'status': 'SUCC' if pbkey is not None else 'FAIL'
                     }
-                    # pbkey = Encryption.deserialize_public_key(plain["pbkey"])
 
-                    if pbkey is None: 
-                        print('Failed to register user')
-                        return -1
-                    cipher = Encryption.sym_encrypt(json.dumps(outp), client_keys[c])
-                    # signature = Encryption.signature(json.dumps(outp), private_key)
-                    response = {'cipher': cipher, 'status' : 'SUCC'}
-                    send(json.dumps(response), c)
-                    print('User registered successfully!')
+                    data_to_send = Encryption.sign(outp, private_key)
+
+                    send(Encryption.sym_encrypt(json.dumps(data_to_send), client_keys[c]), c)
+
+                    # print('User registered successfully!')
+                    if outp['status'] == 'FAIL':
+                        print('Could not register user')
+                    else:
+                        print('User successfuly registered.')
 
                 elif payload['type'] == 'login':
 
@@ -228,7 +236,6 @@ def new_connection(c, a):
                     if uname in authorized_users:
                         response = {'cipher': "", 'signature': "", 'status' : 'FAIL'}
                     else:
-                        
                         result = login(plain['username'], plain['password'])
 
                         outp = {
@@ -256,6 +263,8 @@ def new_connection(c, a):
                     client_key = client_keys[c]
                     nonce = int(payload['nonce'])
                     online_users = list(authorized_users.keys())
+                    random.shuffle(online_users)
+                    
                     outp = {
                         'command': 'show_online',
                         'status': 'SUCC',
@@ -434,6 +443,13 @@ def new_connection(c, a):
                     response = Encryption.sign(response, private_key)
                     response = Encryption.sym_encrypt(json.dumps(response), client_keys[authorized_users[uname]['main_sock']])
                     send_to_main_sock(response, uname)
+                elif payload['type'] == 'create_group':
+
+                    nonce = payload['nonce']
+                    group_name = payload['group_name']
+                    username = payload['username']
+
+                    creation_result = create_group(username, group_name)
 
             except Exception as e:
                 raise e
